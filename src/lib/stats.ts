@@ -11,6 +11,8 @@
 import type {
   Cell, DescriptiveRow, ReliabilityResult, CorrelationResult,
   TTestResult, AnovaResult, RegressionResult, ChiSquareResult,
+  FactorAnalysisResult, MannWhitneyResult, WilcoxonResult, KruskalWallisResult,
+  MediationResult, ModerationResult,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -551,6 +553,397 @@ export function chiSquare(
   const p = chiSqUpperP(chi2, df);
   const cramersV = Math.sqrt(chi2 / (total * Math.min(rowLevels.length - 1, colLevels.length - 1)));
   return { rowVar, colVar, observed, expected, rowLevels, colLevels, chi2, df, p, cramersV };
+}
+
+// ---------------------------------------------------------------------------
+// Factor analysis — PCA + EFA (principal-axis factoring) + varimax rotation
+// ---------------------------------------------------------------------------
+// Built on a Jacobi eigendecomposition of the correlation matrix. KMO + Bartlett
+// for sampling adequacy. Faithful to the SPSS "Factor Analysis" workflow.
+
+// Jacobi method for the eigenvalues and eigenvectors of a symmetric matrix.
+// Returns eigenvalues + eigenvectors as columns (in original order).
+function jacobi(A0: number[][]): { values: number[]; vectors: number[][] } {
+  const n = A0.length;
+  const a = A0.map(row => [...row]);
+  const v: number[][] = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  const MAX_SWEEPS = 100;
+  for (let sweep = 0; sweep < MAX_SWEEPS; sweep++) {
+    let off = 0;
+    for (let p = 0; p < n - 1; p++) for (let q = p + 1; q < n; q++) off += Math.abs(a[p][q]);
+    if (off < 1e-12) break;
+    for (let p = 0; p < n - 1; p++) for (let q = p + 1; q < n; q++) {
+      const apq = a[p][q];
+      if (Math.abs(apq) < 1e-14) continue;
+      const app = a[p][p], aqq = a[q][q];
+      const theta = (aqq - app) / (2 * apq);
+      const t = theta >= 0 ? 1 / (theta + Math.sqrt(1 + theta * theta)) : 1 / (theta - Math.sqrt(1 + theta * theta));
+      const c = 1 / Math.sqrt(1 + t * t), s = t * c;
+      a[p][p] = app - t * apq;
+      a[q][q] = aqq + t * apq;
+      a[p][q] = a[q][p] = 0;
+      for (let r = 0; r < n; r++) {
+        if (r !== p && r !== q) {
+          const arp = a[r][p], arq = a[r][q];
+          a[r][p] = a[p][r] = c * arp - s * arq;
+          a[r][q] = a[q][r] = s * arp + c * arq;
+        }
+        const vrp = v[r][p], vrq = v[r][q];
+        v[r][p] = c * vrp - s * vrq;
+        v[r][q] = s * vrp + c * vrq;
+      }
+    }
+  }
+  const values = a.map((row, i) => row[i]);
+  return { values, vectors: v };
+}
+
+function correlationMatrixDense(M: number[][]): number[][] {
+  const n = M.length, k = M[0].length;
+  const means: number[] = [];
+  const sds: number[] = [];
+  for (let j = 0; j < k; j++) {
+    const col = M.map(r => r[j]);
+    means.push(mean(col));
+    sds.push(sd(col));
+  }
+  const R = Array.from({ length: k }, () => new Array(k).fill(0));
+  for (let a = 0; a < k; a++) for (let b = a; b < k; b++) {
+    let s = 0;
+    for (let i = 0; i < n; i++) s += ((M[i][a] - means[a]) / sds[a]) * ((M[i][b] - means[b]) / sds[b]);
+    const r = s / (n - 1);
+    R[a][b] = R[b][a] = a === b ? 1 : r;
+  }
+  return R;
+}
+
+// Kaiser-Meyer-Olkin from the anti-image (partial) correlation matrix.
+function kmo(R: number[][]): number {
+  const inv = invert(R);
+  if (!inv) return NaN;
+  const k = R.length;
+  let sumR2 = 0, sumP2 = 0;
+  for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) if (i !== j) {
+    sumR2 += R[i][j] * R[i][j];
+    const pij = -inv[i][j] / Math.sqrt(inv[i][i] * inv[j][j]);
+    sumP2 += pij * pij;
+  }
+  return sumR2 / (sumR2 + sumP2);
+}
+
+// Bartlett's test of sphericity.
+function bartlett(R: number[][], n: number): { chi2: number; df: number; p: number } {
+  const k = R.length;
+  const det = matDet(R);
+  if (!Number.isFinite(det) || det <= 0) return { chi2: NaN, df: NaN, p: NaN };
+  const chi2 = -(n - 1 - (2 * k + 5) / 6) * Math.log(det);
+  const df = (k * (k - 1)) / 2;
+  return { chi2, df, p: chiSqUpperP(chi2, df) };
+}
+
+// Determinant via LU-ish row reduction.
+function matDet(M: number[][]): number {
+  const n = M.length;
+  const a = M.map(r => [...r]);
+  let det = 1;
+  for (let i = 0; i < n; i++) {
+    let piv = i;
+    for (let r = i + 1; r < n; r++) if (Math.abs(a[r][i]) > Math.abs(a[piv][i])) piv = r;
+    if (Math.abs(a[piv][i]) < 1e-14) return 0;
+    if (piv !== i) { [a[i], a[piv]] = [a[piv], a[i]]; det = -det; }
+    det *= a[i][i];
+    for (let r = i + 1; r < n; r++) {
+      const f = a[r][i] / a[i][i];
+      for (let c = i; c < n; c++) a[r][c] -= f * a[i][c];
+    }
+  }
+  return det;
+}
+
+// Varimax rotation of a loading matrix (items × factors). Returns rotated loadings.
+function varimax(L0: number[][], gamma = 1, maxIter = 100, tol = 1e-8): number[][] {
+  const p = L0.length, k = L0[0].length;
+  if (k < 2) return L0.map(r => [...r]);
+  let L = L0.map(r => [...r]);
+  let dOld = 0;
+  for (let iter = 0; iter < maxIter; iter++) {
+    let d = 0;
+    for (let q = 0; q < k - 1; q++) for (let r = q + 1; r < k; r++) {
+      let A = 0, B = 0, C = 0, D = 0;
+      for (let i = 0; i < p; i++) {
+        const x = L[i][q], y = L[i][r];
+        const u = x * x - y * y, v2 = 2 * x * y;
+        A += u; B += v2; C += u * u - v2 * v2; D += 2 * u * v2;
+      }
+      const num = D - (2 * gamma * A * B) / p;
+      const den = C - (gamma * (A * A - B * B)) / p;
+      const phi = Math.atan2(num, den) / 4;
+      if (Math.abs(phi) < 1e-10) continue;
+      const c = Math.cos(phi), s = Math.sin(phi);
+      for (let i = 0; i < p; i++) {
+        const x = L[i][q], y = L[i][r];
+        L[i][q] = c * x + s * y;
+        L[i][r] = -s * x + c * y;
+      }
+      d += Math.abs(phi);
+    }
+    if (Math.abs(d - dOld) < tol) break;
+    dOld = d;
+  }
+  return L;
+}
+
+export function factorAnalysis(
+  cols: Record<string, Cell[]>, items: string[],
+  opts: { method?: 'pca' | 'efa'; nFactors?: number; rotation?: 'none' | 'varimax' } = {},
+): FactorAnalysisResult | null {
+  const method = opts.method ?? 'pca';
+  const rotation = opts.rotation ?? 'varimax';
+  const M = completeMatrix(cols, items);
+  const n = M.length, k = items.length;
+  if (n < k + 5) return null;
+
+  const R = correlationMatrixDense(M);
+  const kmoVal = kmo(R);
+  const bart = bartlett(R, n);
+
+  // PAF iterates communalities; PCA uses R as-is (diagonals = 1).
+  let Rcurr = R.map(r => [...r]);
+  let communalities = new Array(k).fill(1);
+  if (method === 'efa') {
+    // Initial communalities: 1 - 1/diag(R⁻¹) (SMC)
+    const inv = invert(R);
+    if (inv) for (let i = 0; i < k; i++) communalities[i] = Math.max(0, 1 - 1 / inv[i][i]);
+    for (let iter = 0; iter < 25; iter++) {
+      for (let i = 0; i < k; i++) Rcurr[i][i] = communalities[i];
+      const { values, vectors } = jacobi(Rcurr);
+      const order = values.map((v, i) => [v, i] as [number, number]).sort((a, b) => b[0] - a[0]);
+      const nFac = opts.nFactors ?? Math.max(1, order.filter(([v]) => v >= 1).length);
+      const newCom = new Array(k).fill(0);
+      for (let i = 0; i < k; i++) {
+        for (let f = 0; f < nFac; f++) {
+          const idx = order[f][1];
+          const lam = Math.sqrt(Math.max(0, order[f][0]));
+          const load = vectors[i][idx] * lam;
+          newCom[i] += load * load;
+        }
+      }
+      let delta = 0;
+      for (let i = 0; i < k; i++) { delta += Math.abs(newCom[i] - communalities[i]); communalities[i] = Math.min(1, newCom[i]); }
+      if (delta < 1e-5) break;
+    }
+    for (let i = 0; i < k; i++) Rcurr[i][i] = communalities[i];
+  }
+
+  const { values, vectors } = jacobi(Rcurr);
+  const order = values.map((v, i) => [v, i] as [number, number]).sort((a, b) => b[0] - a[0]);
+  const eigenvalues = order.map(([v]) => v);
+  const totalVar = method === 'efa' ? communalities.reduce((a, b) => a + b, 0) : k;
+  const varianceExplained = eigenvalues.map(v => v / totalVar);
+  const cumulativeVariance = varianceExplained.reduce((acc: number[], v, i) => { acc.push(i === 0 ? v : acc[i - 1] + v); return acc; }, []);
+
+  const nFactors = opts.nFactors ?? Math.max(1, eigenvalues.filter(v => v >= 1).length);
+  let loadings = Array.from({ length: k }, () => new Array(nFactors).fill(0));
+  for (let i = 0; i < k; i++) for (let f = 0; f < nFactors; f++) {
+    const idx = order[f][1];
+    const lam = Math.sqrt(Math.max(0, eigenvalues[f]));
+    loadings[i][f] = vectors[i][idx] * lam;
+  }
+  if (rotation === 'varimax' && nFactors >= 2) loadings = varimax(loadings);
+
+  const com = loadings.map(row => row.reduce((a, b) => a + b * b, 0));
+
+  return {
+    method, items, n, k,
+    kmo: kmoVal,
+    bartlettChi2: bart.chi2, bartlettDf: bart.df, bartlettP: bart.p,
+    eigenvalues, varianceExplained, cumulativeVariance,
+    nFactors, rotation, loadings,
+    communalities: method === 'efa' ? communalities : com,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Nonparametric tests — Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis
+// ---------------------------------------------------------------------------
+
+function rankWithTies(xs: number[]): { ranks: number[]; tieCorrection: number } {
+  const idx = xs.map((v, i) => [v, i] as [number, number]).sort((a, b) => a[0] - b[0]);
+  const ranks = new Array(xs.length).fill(0);
+  let i = 0, tieCorrection = 0;
+  while (i < idx.length) {
+    let j = i;
+    while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
+    const avg = (i + j) / 2 + 1;
+    const t = j - i + 1;
+    if (t > 1) tieCorrection += t ** 3 - t;
+    for (let m = i; m <= j; m++) ranks[idx[m][1]] = avg;
+    i = j + 1;
+  }
+  return { ranks, tieCorrection };
+}
+
+export function mannWhitney(g1: number[], g2: number[], labels: [string, string] = ['Group 1', 'Group 2']): MannWhitneyResult {
+  const n1 = g1.length, n2 = g2.length;
+  const all = [...g1, ...g2];
+  const { ranks, tieCorrection } = rankWithTies(all);
+  const r1 = ranks.slice(0, n1).reduce((a, b) => a + b, 0);
+  const r2 = ranks.slice(n1).reduce((a, b) => a + b, 0);
+  const u1 = r1 - (n1 * (n1 + 1)) / 2;
+  const u2 = r2 - (n2 * (n2 + 1)) / 2;
+  const u = Math.min(u1, u2);
+  const w = r1;
+  const N = n1 + n2;
+  const muU = (n1 * n2) / 2;
+  const sigmaU = Math.sqrt(((n1 * n2) / 12) * ((N + 1) - tieCorrection / (N * (N - 1))));
+  const z = sigmaU > 0 ? (u - muU) / sigmaU : 0;
+  const p = 2 * (1 - normalCdf(Math.abs(z)));
+  return {
+    kind: 'mann-whitney', groups: labels, n1, n2, u, w, z, p,
+    meanRank1: r1 / n1, meanRank2: r2 / n2,
+    rankBiserial: 1 - (2 * u) / (n1 * n2),
+  };
+}
+
+export function wilcoxonSignedRank(x: number[], y: number[], labels: [string, string] = ['Measure 1', 'Measure 2']): WilcoxonResult {
+  const diffs: number[] = [];
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    const d = x[i] - y[i];
+    if (d !== 0) diffs.push(d);
+  }
+  const n = diffs.length;
+  const abs = diffs.map(d => Math.abs(d));
+  const { ranks, tieCorrection } = rankWithTies(abs);
+  let wPlus = 0, wMinus = 0;
+  for (let i = 0; i < n; i++) (diffs[i] > 0 ? (wPlus += ranks[i]) : (wMinus += ranks[i]));
+  const w = Math.min(wPlus, wMinus);
+  const mu = (n * (n + 1)) / 4;
+  const sigma = Math.sqrt(((n * (n + 1) * (2 * n + 1)) - tieCorrection / 2) / 24);
+  const z = sigma > 0 ? (w - mu) / sigma : 0;
+  const p = 2 * (1 - normalCdf(Math.abs(z)));
+  return {
+    kind: 'wilcoxon-signed-rank', vars: labels, n, w, z, p,
+    matchedR: n > 0 ? z / Math.sqrt(n) : NaN,
+  };
+}
+
+export function kruskalWallis(dv: string, factor: string, groups: { level: string; values: number[] }[]): KruskalWallisResult {
+  const all: number[] = [];
+  const idx: number[] = []; // group index per observation
+  groups.forEach((g, i) => g.values.forEach(v => { all.push(v); idx.push(i); }));
+  const N = all.length, kG = groups.length;
+  const { ranks, tieCorrection } = rankWithTies(all);
+  const sumRanks = new Array(kG).fill(0);
+  const counts = new Array(kG).fill(0);
+  for (let i = 0; i < N; i++) { sumRanks[idx[i]] += ranks[i]; counts[idx[i]]++; }
+  let H = 0;
+  for (let g = 0; g < kG; g++) H += (sumRanks[g] * sumRanks[g]) / counts[g];
+  H = (12 / (N * (N + 1))) * H - 3 * (N + 1);
+  const tieAdj = 1 - tieCorrection / (N ** 3 - N);
+  if (tieAdj > 0) H /= tieAdj;
+  const df = kG - 1;
+  const p = chiSqUpperP(H, df);
+  const epsilonSquared = H / ((N * N - 1) / (N + 1));
+  return {
+    kind: 'kruskal-wallis', factor, dv,
+    groups: groups.map((g, i) => ({ level: g.level, n: counts[i], meanRank: sumRanks[i] / counts[i] })),
+    h: H, df, p, epsilonSquared,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Mediation (PROCESS Model 4) + Moderation (Model 1)
+// ---------------------------------------------------------------------------
+// Implements simple, single-mediator and single-moderator linear models the way
+// Hayes' PROCESS macro presents them in papers. Mediation uses percentile
+// bootstrap (default 5000 resamples) for the CI of the indirect effect.
+
+function simpleOLS(y: number[], xs: number[][]): { b: number[]; se: number[]; pVals: number[]; r2: number; resid: number[] } | null {
+  const r = regression('_', y, xs[0].map((_, j) => `x${j}`), xs);
+  if (!r) return null;
+  const b = r.coefficients.map(c => c.b);
+  const se = r.coefficients.map(c => c.se);
+  const pVals = r.coefficients.map(c => c.p);
+  const yhat = xs.map(row => b[0] + row.reduce((a, v, i) => a + v * b[i + 1], 0));
+  const resid = y.map((v, i) => v - yhat[i]);
+  return { b, se, pVals, r2: r.r2, resid };
+}
+
+export function mediation(xN: string, mN: string, yN: string, x: number[], m: number[], y: number[], bootstrapN = 5000): MediationResult | null {
+  const n = x.length;
+  if (n < 10) return null;
+  const xm = simpleOLS(m, x.map(v => [v]));                       // M = a0 + aX
+  const xmy = simpleOLS(y, x.map((v, i) => [v, m[i]]));            // Y = b0 + c'X + bM
+  const xy = simpleOLS(y, x.map(v => [v]));                       // Y = b0 + cX
+  if (!xm || !xmy || !xy) return null;
+  const a = xm.b[1], aSE = xm.se[1], aP = xm.pVals[1];
+  const cPrime = xmy.b[1], cPrimeSE = xmy.se[1], cPrimeP = xmy.pVals[1];
+  const b = xmy.b[2], bSE = xmy.se[2], bP = xmy.pVals[2];
+  const c = xy.b[1], cSE = xy.se[1], cP = xy.pVals[1];
+  const indirect = a * b;
+  const sobelSE = Math.sqrt(b * b * aSE * aSE + a * a * bSE * bSE);
+  const sobelZ = sobelSE > 0 ? indirect / sobelSE : 0;
+  const sobelP = 2 * (1 - normalCdf(Math.abs(sobelZ)));
+
+  // Percentile bootstrap.
+  const boots: number[] = [];
+  const seed = 0xC0FFEE; let rng = seed;
+  const rand = () => { rng = (rng * 1664525 + 1013904223) >>> 0; return rng / 0x100000000; };
+  for (let i = 0; i < bootstrapN; i++) {
+    const bx: number[] = [], bm: number[] = [], by: number[] = [];
+    for (let j = 0; j < n; j++) { const k = Math.floor(rand() * n); bx.push(x[k]); bm.push(m[k]); by.push(y[k]); }
+    const fitA = simpleOLS(bm, bx.map(v => [v]));
+    const fitB = simpleOLS(by, bx.map((v, idx) => [v, bm[idx]]));
+    if (fitA && fitB) boots.push(fitA.b[1] * fitB.b[2]);
+  }
+  boots.sort((p1, p2) => p1 - p2);
+  const lo = boots[Math.floor(0.025 * boots.length)] ?? NaN;
+  const hi = boots[Math.floor(0.975 * boots.length)] ?? NaN;
+
+  return {
+    x: xN, m: mN, y: yN, n,
+    a, aSE, aP, b, bSE, bP, cPrime, cPrimeSE, cPrimeP, c, cSE, cP,
+    indirect, sobelZ, sobelP, bootstrapCI95: [lo, hi], bootstrapN,
+  };
+}
+
+export function moderation(xN: string, wN: string, yN: string, x: number[], w: number[], y: number[]): ModerationResult | null {
+  const n = x.length;
+  if (n < 10) return null;
+  const mx = mean(x), mw = mean(w);
+  const xc = x.map(v => v - mx);
+  const wc = w.map(v => v - mw);
+  const xw = xc.map((v, i) => v * wc[i]);
+  // Step 1: main effects only (for ΔR²).
+  const main = regression(yN, y, [xN, wN], xc.map((v, i) => [v, wc[i]]));
+  // Step 2: add interaction term.
+  const full = regression(yN, y, [xN, wN, `${xN} × ${wN}`], xc.map((v, i) => [v, wc[i], xw[i]]));
+  if (!main || !full) return null;
+  const sw = sd(w);
+  const lowW = -sw, hiW = sw;
+  const bX = full.coefficients[1].b, bW = full.coefficients[2].b, bXW = full.coefficients[3].b;
+  const seXW = full.coefficients[3].se;
+  // Simple slopes of Y on X at low/mean/high W: slope = bX + bXW * (Wc).
+  const slope = (wcVal: number) => bX + bXW * wcVal;
+  // SE of the simple slope from the variance-covariance matrix would be ideal; here we use
+  // the delta approximation: var(slope) = var(bX) + Wc² var(bXW) + 2 Wc cov(bX, bXW).
+  // Without the full covariance, we conservatively approximate using SE(bX) and SE(bXW).
+  const seX = full.coefficients[1].se;
+  const seSlope = (wcVal: number) => Math.sqrt(seX * seX + wcVal * wcVal * seXW * seXW);
+  const slopeLine = (wcVal: number, label: string) => {
+    const s = slope(wcVal), se = seSlope(wcVal);
+    const t = se > 0 ? s / se : 0;
+    return { wLevel: label, w: mw + wcVal, slope: s, se, t, p: tTwoTailedP(t, n - 4) };
+  };
+  return {
+    x: xN, w: wN, y: yN, n,
+    bX, seX, pX: full.coefficients[1].p,
+    bW, seW: full.coefficients[2].se, pW: full.coefficients[2].p,
+    bXW, seXW, pXW: full.coefficients[3].p,
+    intercept: full.coefficients[0].b,
+    r2: full.r2, r2Change: full.r2 - main.r2,
+    simpleSlopes: [slopeLine(lowW, '−1 SD'), slopeLine(0, 'Mean'), slopeLine(hiW, '+1 SD')],
+  };
 }
 
 // shared formatting helpers

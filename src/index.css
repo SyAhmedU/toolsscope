@@ -129,3 +129,34 @@ table.corr td.corr-empty { background: var(--bg-soft); }
 /* viz */
 .viz-wrap { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-top: 6px; box-shadow: var(--shadow-sm); }
 .viz-wrap svg { display: block; margin: 8px auto 0; max-width: 560px; }
+
+/* ---- v2: report bar -------------------------------------------------------- */
+.report-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 14px 0 8px; padding: 12px 14px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.report-bar .cell-input { flex: 1; min-width: 160px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+.btn.primary { background: linear-gradient(135deg, var(--accent-warm-a) 0%, var(--accent-warm-b) 55%, var(--accent-warm-c) 100%); color: #fff; border: none; padding: 8px 16px; border-radius: 999px; font-weight: 700; box-shadow: 0 4px 12px -4px rgba(241,69,117,.45); }
+.btn.primary:disabled { opacity: .55; cursor: not-allowed; }
+.result-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin: 12px 0; }
+.result-actions .ai-writeup { margin: 0; }
+
+/* ---- v2: qualitative panel ------------------------------------------------- */
+.qual-grid { display: grid; grid-template-columns: 260px 1fr; gap: 16px; margin-top: 14px; }
+@media (max-width: 800px) { .qual-grid { grid-template-columns: 1fr; } }
+.qual-sidebar { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
+.qual-doclist, .qual-codelist { list-style: none; padding: 0; margin: 6px 0 10px; max-height: 240px; overflow-y: auto; }
+.qual-doclist li, .qual-codelist li { display: flex; align-items: center; padding: 6px 8px; border-radius: 8px; gap: 6px; border-left: 3px solid transparent; }
+.qual-doclist li:hover, .qual-codelist li:hover { background: var(--bg-soft); }
+.qual-doclist li.active, .qual-codelist li.active { background: var(--bg-soft); }
+.link-btn { background: none; border: none; color: var(--ink); padding: 0; text-align: left; flex: 1; }
+.x-btn { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; color: var(--ink-mute); font-size: 14px; line-height: 1.2; }
+.x-btn:hover { color: var(--bad); border-color: var(--bad); }
+.qual-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.qual-paste { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.qual-paste input, .qual-paste textarea { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); width: 100%; font: inherit; }
+.qual-main { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.qual-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); margin-bottom: 12px; }
+.qual-doc { background: var(--bg); border: 1px solid var(--line-soft); border-radius: 10px; padding: 16px 18px; font-family: var(--serif); white-space: pre-wrap; line-height: 1.7; max-height: 420px; overflow-y: auto; }
+.code-dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; margin-right: 4px; vertical-align: middle; }
+.qual-analyze { display: grid; gap: 18px; }
+.qual-analyze section { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+.qual-analyze h3 { font-family: var(--display); margin: 0 0 10px; font-size: 17px; }
+.cell-input { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); width: 100%; font: inherit; }

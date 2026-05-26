@@ -115,6 +115,103 @@ export interface ChiSquareResult {
   cramersV: number;     // effect size
 }
 
+// ---- v2: factor analysis (PCA / EFA) ----
+export interface FactorAnalysisResult {
+  method: 'pca' | 'efa';            // pca = principal component analysis; efa = principal-axis factoring
+  items: string[];
+  n: number;                        // complete cases
+  k: number;                        // number of items
+  kmo: number;                      // Kaiser-Meyer-Olkin measure of sampling adequacy
+  bartlettChi2: number;             // Bartlett's test of sphericity
+  bartlettDf: number;
+  bartlettP: number;
+  eigenvalues: number[];            // sorted descending
+  varianceExplained: number[];      // proportion of variance per component
+  cumulativeVariance: number[];
+  nFactors: number;                 // factors retained (Kaiser by default; ≥ 1 eigenvalue)
+  rotation: 'none' | 'varimax';
+  loadings: number[][];             // items × factors, rotated if requested
+  communalities: number[];          // per item
+}
+
+// ---- v2: nonparametric tests ----
+export interface MannWhitneyResult {
+  kind: 'mann-whitney';
+  groups: [string, string];
+  n1: number; n2: number;
+  u: number; w: number;             // U statistic + Wilcoxon W
+  z: number; p: number;
+  meanRank1: number; meanRank2: number;
+  rankBiserial: number;             // effect size r = 1 - 2U/(n1*n2)
+}
+export interface WilcoxonResult {
+  kind: 'wilcoxon-signed-rank';
+  vars: [string, string];
+  n: number;                        // non-zero pairs
+  w: number;                        // sum of signed ranks (smaller of W+/W-)
+  z: number; p: number;
+  matchedR: number;                 // r = z / sqrt(N)
+}
+export interface KruskalWallisResult {
+  kind: 'kruskal-wallis';
+  factor: string;
+  dv: string;
+  groups: { level: string; n: number; meanRank: number }[];
+  h: number; df: number; p: number;
+  epsilonSquared: number;           // effect size
+}
+
+// ---- v2: mediation (PROCESS Model 4) + moderation (Model 1) ----
+export interface MediationResult {
+  x: string; m: string; y: string;
+  n: number;
+  a: number; aSE: number; aP: number;          // X → M
+  b: number; bSE: number; bP: number;          // M → Y | X
+  cPrime: number; cPrimeSE: number; cPrimeP: number; // X → Y | M (direct)
+  c: number; cSE: number; cP: number;          // X → Y (total)
+  indirect: number;                            // a * b
+  sobelZ: number; sobelP: number;
+  bootstrapCI95: [number, number];             // percentile CI for indirect
+  bootstrapN: number;
+}
+export interface ModerationResult {
+  x: string; w: string; y: string;
+  n: number;
+  bX: number; seX: number; pX: number;
+  bW: number; seW: number; pW: number;
+  bXW: number; seXW: number; pXW: number;      // interaction term
+  intercept: number;
+  r2: number; r2Change: number;                // ΔR² for the interaction
+  simpleSlopes: { wLevel: string; w: number; slope: number; se: number; t: number; p: number }[];
+}
+
+// ---- v2: qualitative analysis ----
+export interface QualCode {
+  id: string;
+  label: string;
+  color: string;
+  theme?: string;
+}
+export interface QualSpan {
+  docId: string;
+  start: number; end: number;
+  codeId: string;
+  text: string;
+}
+export interface QualDoc {
+  id: string;
+  name: string;
+  text: string;
+}
+export interface QualProject {
+  docs: QualDoc[];
+  codes: QualCode[];
+  spans: QualSpan[];
+}
+export interface WordFreqRow { word: string; count: number; docs: number }
+export interface CodeFreqRow { code: string; label: string; count: number; docs: number; theme?: string }
+export interface CoocCell { a: string; b: string; count: number }
+
 // Visualization spec the Visualize view builds from.
 export type ChartType =
   | 'histogram'
