@@ -16,6 +16,7 @@ import type {
   QualProject,
 } from './types';
 import { codeFrequency, coOccurrence, themeRollup, wordFrequency } from './qual';
+import { METHODS, ALWAYS_CITED, fullReferences } from './methodology';
 
 export type ReportEntry =
   | { kind: 'descriptives'; rows: DescriptiveRow[] }
@@ -39,24 +40,38 @@ function fmtP(p: number): string {
   return p < 0.001 ? '< .001' : p.toFixed(3).replace(/^0/, '');
 }
 
-// Methodology references bundled with the report. Each cited only if relevant.
-const REFERENCES: { id: string; cite: string; when: (entries: ReportEntry[]) => boolean }[] = [
-  { id: 'cronbach1951', cite: 'Cronbach, L. J. (1951). Coefficient alpha and the internal structure of tests. Psychometrika, 16(3), 297–334.', when: es => es.some(e => e.kind === 'reliability') },
-  { id: 'cohen1988', cite: 'Cohen, J. (1988). Statistical power analysis for the behavioral sciences (2nd ed.). Lawrence Erlbaum.', when: es => es.some(e => e.kind === 'ttest' || e.kind === 'anova' || e.kind === 'regression') },
-  { id: 'welch1947', cite: 'Welch, B. L. (1947). The generalization of "Student\'s" problem when several different population variances are involved. Biometrika, 34(1/2), 28–35.', when: es => es.some(e => e.kind === 'ttest' && e.result.kind === 'independent') },
-  { id: 'kaiser1958', cite: 'Kaiser, H. F. (1958). The varimax criterion for analytic rotation in factor analysis. Psychometrika, 23(3), 187–200.', when: es => es.some(e => e.kind === 'factor' && e.result.rotation === 'varimax') },
-  { id: 'kaiser1974', cite: 'Kaiser, H. F. (1974). An index of factorial simplicity. Psychometrika, 39(1), 31–36.', when: es => es.some(e => e.kind === 'factor') },
-  { id: 'bartlett1954', cite: 'Bartlett, M. S. (1954). A note on the multiplying factors for various χ² approximations. Journal of the Royal Statistical Society: Series B, 16(2), 296–298.', when: es => es.some(e => e.kind === 'factor') },
-  { id: 'mannwhitney1947', cite: 'Mann, H. B., & Whitney, D. R. (1947). On a test of whether one of two random variables is stochastically larger than the other. Annals of Mathematical Statistics, 18(1), 50–60.', when: es => es.some(e => e.kind === 'mann-whitney') },
-  { id: 'wilcoxon1945', cite: 'Wilcoxon, F. (1945). Individual comparisons by ranking methods. Biometrics Bulletin, 1(6), 80–83.', when: es => es.some(e => e.kind === 'wilcoxon') },
-  { id: 'kruskal1952', cite: 'Kruskal, W. H., & Wallis, W. A. (1952). Use of ranks in one-criterion variance analysis. Journal of the American Statistical Association, 47(260), 583–621.', when: es => es.some(e => e.kind === 'kruskal-wallis') },
-  { id: 'hayes2022', cite: 'Hayes, A. F. (2022). Introduction to mediation, moderation, and conditional process analysis: A regression-based approach (3rd ed.). Guilford Press.', when: es => es.some(e => e.kind === 'mediation' || e.kind === 'moderation') },
-  { id: 'sobel1982', cite: 'Sobel, M. E. (1982). Asymptotic confidence intervals for indirect effects in structural equation models. Sociological Methodology, 13, 290–312.', when: es => es.some(e => e.kind === 'mediation') },
-  { id: 'preacher2008', cite: 'Preacher, K. J., & Hayes, A. F. (2008). Asymptotic and resampling strategies for assessing and comparing indirect effects in multiple mediator models. Behavior Research Methods, 40(3), 879–891.', when: es => es.some(e => e.kind === 'mediation') },
-  { id: 'braun2006', cite: 'Braun, V., & Clarke, V. (2006). Using thematic analysis in psychology. Qualitative Research in Psychology, 3(2), 77–101.', when: es => es.some(e => e.kind === 'qual') },
-  { id: 'apa2020', cite: 'American Psychological Association. (2020). Publication manual of the American Psychological Association (7th ed.).', when: () => true },
-  { id: 'toolsscope2026', cite: 'Ahmed, S. (2026). ToolsScope: An in-browser analysis and visualization workbench. https://toolsscope.vercel.app', when: () => true },
-];
+// Map a captured entry to the methodology key(s) whose citations it pulls in.
+function methodKeysFor(e: ReportEntry): string[] {
+  switch (e.kind) {
+    case 'descriptives': return ['descriptives'];
+    case 'reliability': return ['reliability'];
+    case 'correlation': return [e.result.method === 'spearman' ? 'correlation_spearman' : 'correlation_pearson'];
+    case 'ttest': return [e.result.kind === 'independent' ? 'ttest_independent' : 'ttest_paired'];
+    case 'anova': return ['anova'];
+    case 'regression': return ['regression'];
+    case 'chisquare': return ['chisquare'];
+    case 'factor': return [e.result.method === 'pca' ? 'factor_pca' : 'factor_efa'];
+    case 'mann-whitney': return ['mann_whitney'];
+    case 'wilcoxon': return ['wilcoxon'];
+    case 'kruskal-wallis': return ['kruskal_wallis'];
+    case 'mediation': return ['mediation'];
+    case 'moderation': return ['moderation'];
+    case 'qual': return ['qual_coding'];
+  }
+}
+
+function citationsForReport(entries: ReportEntry[]): string[] {
+  const keys = new Set<string>(ALWAYS_CITED);
+  for (const e of entries) {
+    for (const mid of methodKeysFor(e)) {
+      const m = METHODS[mid];
+      if (!m) continue;
+      m.primary.forEach(k => keys.add(k));
+      (m.supporting ?? []).forEach(k => keys.add(k));
+    }
+  }
+  return [...keys];
+}
 
 export interface ReportMeta {
   title: string;
@@ -283,8 +298,10 @@ export async function buildReport(meta: ReportMeta, entries: ReportEntry[]): Pro
   }
 
   // ---- References -----------------------------------------------------------
+  // Auto-derived from the methodologies of the analyses the user actually ran
+  // (plus ALWAYS_CITED). Nothing orphan, nothing missing.
   children.push(heading('References', 1));
-  for (const r of REFERENCES) if (r.when(entries)) children.push(para(r.cite, { size: 20 }));
+  for (const ref of fullReferences(citationsForReport(entries))) children.push(para(ref.full, { size: 20 }));
 
   const doc = new Document({
     creator: meta.author || 'ToolsScope',

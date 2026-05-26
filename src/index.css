@@ -160,3 +160,31 @@ table.corr td.corr-empty { background: var(--bg-soft); }
 .qual-analyze section { background: var(--bg-elev); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
 .qual-analyze h3 { font-family: var(--display); margin: 0 0 10px; font-size: 17px; }
 .cell-input { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); width: 100%; font: inherit; }
+
+/* ---- v2: methodology card -------------------------------------------------- */
+.method-card { margin: 14px 0 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-elev); box-shadow: var(--shadow-sm); overflow: hidden; }
+.method-toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent-warm-a) 6%, transparent), transparent); border: 0; text-align: left; color: var(--ink); cursor: pointer; }
+.method-toggle:hover { background: linear-gradient(180deg, color-mix(in srgb, var(--accent-warm-a) 10%, transparent), transparent); }
+.method-chev { font-size: 12px; color: var(--ink-mute); }
+.method-name { font-weight: 700; font-family: var(--display); font-size: 14.5px; flex: 1; }
+.method-cite { font-size: 12px; color: var(--ink-mute); font-style: italic; }
+.method-body { padding: 6px 14px 14px; border-top: 1px solid var(--line-soft); display: grid; gap: 10px; }
+.method-row { display: grid; grid-template-columns: 110px 1fr; gap: 12px; font-size: 13.5px; align-items: start; }
+@media (max-width: 640px) { .method-row { grid-template-columns: 1fr; } }
+.method-label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-mute); font-weight: 700; padding-top: 2px; }
+.method-bullets { margin: 0; padding-left: 18px; }
+.method-bullets li { margin-bottom: 2px; }
+.method-template { display: block; padding: 6px 10px; background: var(--bg-soft); border: 1px dashed var(--line); border-radius: 6px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; color: var(--ink-soft); white-space: pre-wrap; }
+.method-refs { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--ink-soft); }
+.method-refs li { margin-bottom: 4px; line-height: 1.45; }
+
+/* ---- v2: effect-size benchmark chip ---------------------------------------- */
+.es-chip { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; vertical-align: middle; }
+.es-chip .es-cite { font-weight: 400; opacity: 0.75; text-transform: none; letter-spacing: 0; }
+.es-negligible { background: color-mix(in srgb, var(--ink-mute) 18%, transparent); color: var(--ink-soft); }
+.es-small { background: color-mix(in srgb, #f59e0b 22%, transparent); color: #b46710; }
+.es-medium { background: color-mix(in srgb, #3b82f6 22%, transparent); color: #1d4ed8; }
+.es-large { background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good); }
+[data-theme='dark'] .es-small { color: #fbbf24; }
+[data-theme='dark'] .es-medium { color: #60a5fa; }
+[data-theme='dark'] .es-large { color: #34d399; }

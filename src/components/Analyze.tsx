@@ -11,8 +11,11 @@ import {
   describe, cronbach, correlationMatrix, independentTTest, pairedTTest,
   oneWayAnova, regression, chiSquare, factorAnalysis, mannWhitney,
   wilcoxonSignedRank, kruskalWallis, mediation, moderation,
+  skewness, kurtosis,
   fmt, fmtP, pStars,
 } from '../lib/stats';
+import { METHODS } from '../lib/methodology';
+import { MethodologyCard, EffectSizeChip } from './Methodology';
 
 type Kind =
   | 'descriptives' | 'reliability' | 'correlation' | 'ttest' | 'anova'
@@ -103,12 +106,12 @@ function CaptureBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
-function AIWriteup({ analysis, result }: { analysis: string; result: unknown }) {
+function AIWriteup({ analysis, result, methodId }: { analysis: string; result: unknown; methodId?: string }) {
   const [text, setText] = useState(''); const [loading, setLoading] = useState(false); const [src, setSrc] = useState('');
   async function run() {
     setLoading(true);
     try {
-      const r = await fetch('/api/interpret', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ analysis, result }) });
+      const r = await fetch('/api/interpret', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ analysis, result, methodId }) });
       const data = await r.json();
       setText(data.text || ''); setSrc(data._source || '');
     } catch { setText('Could not reach the interpreter endpoint (run with the API deployed, or set GROQ_API_KEY).'); }
@@ -120,6 +123,18 @@ function AIWriteup({ analysis, result }: { analysis: string; result: unknown }) 
       {text && <div className="ai-text">{text}{src === 'fallback' && <span className="muted"> — offline template</span>}</div>}
     </div>
   );
+}
+
+// Light normality nudge — when group data violates t-test/ANOVA assumptions,
+// surface a callout pointing to the appropriate nonparametric counterpart.
+function NormalityNudge({ values, suggest }: { values: number[]; suggest: string }) {
+  if (values.length < 8) return null;
+  const sk = skewness(values), ku = kurtosis(values);
+  if (!Number.isFinite(sk)) return null;
+  if (Math.abs(sk) > 1 || Math.abs(ku) > 3) {
+    return <div className="warn-box">Distribution looks non-normal (|skew| = {fmt(Math.abs(sk), 2)}, excess kurt = {fmt(ku, 2)}). Consider {suggest} as the more appropriate test.</div>;
+  }
+  return null;
 }
 
 // Helper: pairwise complete numeric values for two columns.
@@ -146,6 +161,7 @@ function Descriptives({ cols, numeric, onCapture }: { cols: Record<string, Cell[
   const rows = sel.map(v => describe(v, cols[v]));
   return (
     <div>
+      <MethodologyCard m={METHODS.descriptives} />
       <MultiPick all={numeric} sel={sel} set={setSel} label="Variables" />
       {rows.length > 0 && (
         <table className="grid stats">
@@ -157,7 +173,7 @@ function Descriptives({ cols, numeric, onCapture }: { cols: Record<string, Cell[
       )}
       {rows.length > 0 && (
         <div className="result-actions">
-          <AIWriteup analysis="descriptive statistics" result={rows} />
+          <AIWriteup analysis="descriptive statistics" result={rows} methodId="descriptives" />
           <CaptureBtn onClick={() => onCapture({ kind: 'descriptives', rows })} />
         </div>
       )}
@@ -171,6 +187,7 @@ function Reliability({ cols, numeric, onCapture }: { cols: Record<string, Cell[]
   const res = sel.length >= 2 ? cronbach(cols, sel) : null;
   return (
     <div>
+      <MethodologyCard m={METHODS.reliability} />
       <MultiPick all={numeric} sel={sel} set={setSel} label="Scale items (pick ≥ 2)" />
       <p className="muted small">Tip: this duplicates ScaleScope's reliability calculator — for designing/selecting scales, see <a href="https://scalescope.vercel.app" target="_blank" rel="noreferrer">ScaleScope</a>.</p>
       {res && (
@@ -186,7 +203,7 @@ function Reliability({ cols, numeric, onCapture }: { cols: Record<string, Cell[]
             <tbody>{res.itemTotal.map(t => <tr key={t.item}><td>{t.item}</td><td>{fmt(t.corrected_r, 3)}</td><td>{fmt(t.alpha_if_deleted, 3)}</td></tr>)}</tbody>
           </table>
           <div className="result-actions">
-            <AIWriteup analysis="scale reliability (Cronbach's alpha)" result={res} />
+            <AIWriteup analysis="scale reliability (Cronbach's alpha)" result={res} methodId="reliability" />
             <CaptureBtn onClick={() => onCapture({ kind: 'reliability', result: res })} />
           </div>
         </>
@@ -202,6 +219,7 @@ function Correlation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]
   const res = sel.length >= 2 ? correlationMatrix(cols, sel, method) : null;
   return (
     <div>
+      <MethodologyCard m={method === 'pearson' ? METHODS.correlation_pearson : METHODS.correlation_spearman} />
       <MultiPick all={numeric} sel={sel} set={setSel} label="Variables (pick ≥ 2)" />
       <div className="inline-toggle">
         <button className={`chip ${method === 'pearson' ? 'active' : ''}`} onClick={() => setMethod('pearson')}>Pearson</button>
@@ -219,7 +237,7 @@ function Correlation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]
           </table>
           <div className="muted small">* p &lt; .05, ** p &lt; .01, *** p &lt; .001 (two-tailed). Pairwise N.</div>
           <div className="result-actions">
-            <AIWriteup analysis={`${method} correlation matrix`} result={res} />
+            <AIWriteup analysis={`${method} correlation matrix`} result={res} methodId={method === 'pearson' ? 'correlation_pearson' : 'correlation_spearman'} />
             <CaptureBtn onClick={() => onCapture({ kind: 'correlation', result: res })} />
           </div>
         </>
@@ -235,20 +253,23 @@ function TTest({ cols, numeric, cats2, onCapture }: { cols: Record<string, Cell[
   const [x, setX] = useState(''); const [y, setY] = useState('');
 
   let res = null, levels: string[] = [];
+  let groupA: number[] = [], groupB: number[] = [];      // for normality nudge
+  let pairedDiffs: number[] = [];
   if (mode === 'independent' && dv && grp) {
     const g = cols[grp].map(String); levels = [...new Set(cols[grp].filter(c => c !== null && c !== '').map(String))].sort();
     if (levels.length === 2) {
-      const a: number[] = [], b: number[] = [];
-      cols[dv].forEach((c, i) => { const n = Number(c); if (Number.isFinite(n) && c !== null && c !== '') { if (g[i] === levels[0]) a.push(n); else if (g[i] === levels[1]) b.push(n); } });
-      if (a.length > 1 && b.length > 1) res = { ...independentTTest(a, b), groups: [levels[0], levels[1]] as [string, string] };
+      cols[dv].forEach((c, i) => { const n = Number(c); if (Number.isFinite(n) && c !== null && c !== '') { if (g[i] === levels[0]) groupA.push(n); else if (g[i] === levels[1]) groupB.push(n); } });
+      if (groupA.length > 1 && groupB.length > 1) res = { ...independentTTest(groupA, groupB), groups: [levels[0], levels[1]] as [string, string] };
     }
   } else if (mode === 'paired' && x && y) {
     const { x: xa, y: ya } = pairwise(cols[x], cols[y]);
+    pairedDiffs = xa.map((v, i) => v - ya[i]);
     if (xa.length > 1) res = pairedTTest(xa, ya);
   }
 
   return (
     <div>
+      <MethodologyCard m={mode === 'independent' ? METHODS.ttest_independent : METHODS.ttest_paired} />
       <div className="inline-toggle">
         <button className={`chip ${mode === 'independent' ? 'active' : ''}`} onClick={() => setMode('independent')}>Independent</button>
         <button className={`chip ${mode === 'paired' ? 'active' : ''}`} onClick={() => setMode('paired')}>Paired</button>
@@ -270,7 +291,7 @@ function TTest({ cols, numeric, cats2, onCapture }: { cols: Record<string, Cell[
           <div className="result-head">
             <span className="big-stat">t({fmt(res.df, 1)}) = {fmt(res.t)}</span>
             <span className="big-stat">p = {fmtP(res.p)}</span>
-            <span className="big-stat">d = {fmt(res.cohensD)}</span>
+            <span className="big-stat">d = {fmt(res.cohensD)} <EffectSizeChip value={res.cohensD} m={mode === 'independent' ? METHODS.ttest_independent : METHODS.ttest_paired} /></span>
           </div>
           <table className="grid stats">
             <thead><tr><th>Group</th><th>N</th><th>M</th><th>SD</th></tr></thead>
@@ -280,8 +301,13 @@ function TTest({ cols, numeric, cats2, onCapture }: { cols: Record<string, Cell[
             </tbody>
           </table>
           <div className="muted small">Mean difference {fmt(res.meanDiff)}, 95% CI [{fmt(res.ci95[0])}, {fmt(res.ci95[1])}].{mode === 'independent' ? ' Welch t-test.' : ''}</div>
+          {mode === 'independent' && <>
+            <NormalityNudge values={groupA} suggest="a Mann-Whitney U test" />
+            <NormalityNudge values={groupB} suggest="a Mann-Whitney U test" />
+          </>}
+          {mode === 'paired' && <NormalityNudge values={pairedDiffs} suggest="a Wilcoxon signed-rank test" />}
           <div className="result-actions">
-            <AIWriteup analysis={`${mode} t-test`} result={res} />
+            <AIWriteup analysis={`${mode} t-test`} result={res} methodId={mode === 'independent' ? 'ttest_independent' : 'ttest_paired'} />
             <CaptureBtn onClick={() => onCapture({ kind: 'ttest', result: res })} />
           </div>
         </>
@@ -302,6 +328,7 @@ function Anova({ cols, numeric, catNames, onCapture }: { cols: Record<string, Ce
   }
   return (
     <div>
+      <MethodologyCard m={METHODS.anova} />
       <div className="pick-row">
         <Pick all={numeric} val={dv} set={setDv} label="Outcome (numeric)" />
         <Pick all={catNames} val={factor} set={setFactor} label="Factor (categorical)" />
@@ -311,7 +338,7 @@ function Anova({ cols, numeric, catNames, onCapture }: { cols: Record<string, Ce
           <div className="result-head">
             <span className="big-stat">F({res.dfBetween}, {res.dfWithin}) = {fmt(res.fStat)}</span>
             <span className="big-stat">p = {fmtP(res.p)}</span>
-            <span className="big-stat">η² = {fmt(res.etaSquared, 3)}</span>
+            <span className="big-stat">η² = {fmt(res.etaSquared, 3)} <EffectSizeChip value={res.etaSquared} m={METHODS.anova} /></span>
           </div>
           <table className="grid stats">
             <thead><tr><th>Group</th><th>N</th><th>M</th><th>SD</th></tr></thead>
@@ -327,7 +354,7 @@ function Anova({ cols, numeric, catNames, onCapture }: { cols: Record<string, Ce
             </>
           )}
           <div className="result-actions">
-            <AIWriteup analysis="one-way ANOVA" result={res} />
+            <AIWriteup analysis="one-way ANOVA" result={res} methodId="anova" />
             <CaptureBtn onClick={() => onCapture({ kind: 'anova', result: res })} />
           </div>
         </>
@@ -350,6 +377,7 @@ function Regression({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>
   }
   return (
     <div>
+      <MethodologyCard m={METHODS.regression} />
       <Pick all={numeric} val={dv} set={setDv} label="Outcome (DV)" />
       <MultiPick all={numeric.filter(v => v !== dv)} sel={preds} set={setPreds} label="Predictors" />
       {res && (
@@ -367,7 +395,7 @@ function Regression({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>
             ))}</tbody>
           </table>
           <div className="result-actions">
-            <AIWriteup analysis="multiple linear regression" result={res} />
+            <AIWriteup analysis="multiple linear regression" result={res} methodId="regression" />
             <CaptureBtn onClick={() => onCapture({ kind: 'regression', result: res })} />
           </div>
         </>
@@ -383,6 +411,7 @@ function ChiSq({ cols, catNames, onCapture }: { cols: Record<string, Cell[]>; ca
   const res = rowV && colV && rowV !== colV ? chiSquare(rowV, colV, cols[rowV], cols[colV]) : null;
   return (
     <div>
+      <MethodologyCard m={METHODS.chisquare} />
       <div className="pick-row">
         <Pick all={catNames} val={rowV} set={setRowV} label="Rows (categorical)" />
         <Pick all={catNames} val={colV} set={setColV} label="Columns (categorical)" />
@@ -392,7 +421,7 @@ function ChiSq({ cols, catNames, onCapture }: { cols: Record<string, Cell[]>; ca
           <div className="result-head">
             <span className="big-stat">χ²({res.df}) = {fmt(res.chi2)}</span>
             <span className="big-stat">p = {fmtP(res.p)}</span>
-            <span className="big-stat">Cramér's V = {fmt(res.cramersV, 3)}</span>
+            <span className="big-stat">Cramér's V = {fmt(res.cramersV, 3)} <EffectSizeChip value={res.cramersV} m={METHODS.chisquare} /></span>
           </div>
           <table className="grid stats">
             <thead><tr><th>{res.rowVar} \ {res.colVar}</th>{res.colLevels.map(c => <th key={c}>{c}</th>)}</tr></thead>
@@ -402,7 +431,7 @@ function ChiSq({ cols, catNames, onCapture }: { cols: Record<string, Cell[]>; ca
           </table>
           <div className="muted small">Cells show observed (expected).</div>
           <div className="result-actions">
-            <AIWriteup analysis="chi-square test of independence" result={res} />
+            <AIWriteup analysis="chi-square test of independence" result={res} methodId="chisquare" />
             <CaptureBtn onClick={() => onCapture({ kind: 'chisquare', result: res })} />
           </div>
         </>
@@ -422,6 +451,7 @@ function Factor({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; nu
     : null;
   return (
     <div>
+      <MethodologyCard m={method === 'pca' ? METHODS.factor_pca : METHODS.factor_efa} />
       <MultiPick all={numeric} sel={sel} set={setSel} label="Items (pick ≥ 3)" />
       <div className="inline-toggle">
         <button className={`chip ${method === 'pca' ? 'active' : ''}`} onClick={() => setMethod('pca')}>PCA</button>
@@ -460,7 +490,7 @@ function Factor({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; nu
           </table>
           <div className="muted small">Cells highlighted at |loading| ≥ .40 (a common reporting threshold).</div>
           <div className="result-actions">
-            <AIWriteup analysis={`${res.method === 'pca' ? 'principal component' : 'exploratory factor'} analysis`} result={res} />
+            <AIWriteup analysis={`${res.method === 'pca' ? 'principal component' : 'exploratory factor'} analysis`} result={res} methodId={res.method === 'pca' ? 'factor_pca' : 'factor_efa'} />
             <CaptureBtn onClick={() => onCapture({ kind: 'factor', result: res })} />
           </div>
         </>
@@ -496,6 +526,7 @@ function Nonparam({ cols, numeric, cats2, catNames, onCapture }: { cols: Record<
 
   return (
     <div>
+      <MethodologyCard m={test === 'mann' ? METHODS.mann_whitney : test === 'wilcoxon' ? METHODS.wilcoxon : METHODS.kruskal_wallis} />
       <div className="inline-toggle">
         <button className={`chip ${test === 'mann' ? 'active' : ''}`} onClick={() => setTest('mann')}>Mann-Whitney U</button>
         <button className={`chip ${test === 'wilcoxon' ? 'active' : ''}`} onClick={() => setTest('wilcoxon')}>Wilcoxon signed-rank</button>
@@ -525,7 +556,7 @@ function Nonparam({ cols, numeric, cats2, catNames, onCapture }: { cols: Record<
             <span className="big-stat">U = {fmt(mwRes.u, 1)}</span>
             <span className="big-stat">z = {fmt(mwRes.z)}</span>
             <span className="big-stat">p = {fmtP(mwRes.p)}</span>
-            <span className="big-stat">r = {fmt(mwRes.rankBiserial)}</span>
+            <span className="big-stat">r = {fmt(mwRes.rankBiserial)} <EffectSizeChip value={mwRes.rankBiserial} m={METHODS.mann_whitney} /></span>
           </div>
           <table className="grid stats">
             <thead><tr><th>Group</th><th>N</th><th>Mean rank</th></tr></thead>
@@ -535,7 +566,7 @@ function Nonparam({ cols, numeric, cats2, catNames, onCapture }: { cols: Record<
             </tbody>
           </table>
           <div className="result-actions">
-            <AIWriteup analysis="Mann-Whitney U test" result={mwRes} />
+            <AIWriteup analysis="Mann-Whitney U test" result={mwRes} methodId="mann_whitney" />
             <CaptureBtn onClick={() => onCapture({ kind: 'mann-whitney', result: mwRes })} />
           </div>
         </>
@@ -546,11 +577,11 @@ function Nonparam({ cols, numeric, cats2, catNames, onCapture }: { cols: Record<
             <span className="big-stat">W = {fmt(wilRes.w, 1)}</span>
             <span className="big-stat">z = {fmt(wilRes.z)}</span>
             <span className="big-stat">p = {fmtP(wilRes.p)}</span>
-            <span className="big-stat">r = {fmt(wilRes.matchedR)}</span>
+            <span className="big-stat">r = {fmt(wilRes.matchedR)} <EffectSizeChip value={wilRes.matchedR} m={METHODS.wilcoxon} /></span>
           </div>
           <div className="muted small">{wilRes.n} non-zero paired differences.</div>
           <div className="result-actions">
-            <AIWriteup analysis="Wilcoxon signed-rank test" result={wilRes} />
+            <AIWriteup analysis="Wilcoxon signed-rank test" result={wilRes} methodId="wilcoxon" />
             <CaptureBtn onClick={() => onCapture({ kind: 'wilcoxon', result: wilRes })} />
           </div>
         </>
@@ -560,14 +591,14 @@ function Nonparam({ cols, numeric, cats2, catNames, onCapture }: { cols: Record<
           <div className="result-head">
             <span className="big-stat">H({kwRes.df}) = {fmt(kwRes.h)}</span>
             <span className="big-stat">p = {fmtP(kwRes.p)}</span>
-            <span className="big-stat">ε² = {fmt(kwRes.epsilonSquared, 3)}</span>
+            <span className="big-stat">ε² = {fmt(kwRes.epsilonSquared, 3)} <EffectSizeChip value={kwRes.epsilonSquared} m={METHODS.kruskal_wallis} /></span>
           </div>
           <table className="grid stats">
             <thead><tr><th>Group</th><th>N</th><th>Mean rank</th></tr></thead>
             <tbody>{kwRes.groups.map(g => <tr key={g.level}><td>{g.level}</td><td>{g.n}</td><td>{fmt(g.meanRank)}</td></tr>)}</tbody>
           </table>
           <div className="result-actions">
-            <AIWriteup analysis="Kruskal-Wallis H test" result={kwRes} />
+            <AIWriteup analysis="Kruskal-Wallis H test" result={kwRes} methodId="kruskal_wallis" />
             <CaptureBtn onClick={() => onCapture({ kind: 'kruskal-wallis', result: kwRes })} />
           </div>
         </>
@@ -586,6 +617,7 @@ function Mediation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>;
   }
   return (
     <div>
+      <MethodologyCard m={METHODS.mediation} />
       <div className="pick-row">
         <Pick all={numeric} val={x} set={setX} label="X (independent)" />
         <Pick all={numeric.filter(v => v !== x)} val={m} set={setM} label="M (mediator)" />
@@ -610,7 +642,7 @@ function Mediation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>;
           </table>
           <div className="muted small">CI excludes zero ⇒ significant indirect effect. N = {res.n} complete cases.</div>
           <div className="result-actions">
-            <AIWriteup analysis="mediation analysis (PROCESS Model 4)" result={res} />
+            <AIWriteup analysis="mediation analysis (PROCESS Model 4)" result={res} methodId="mediation" />
             <CaptureBtn onClick={() => onCapture({ kind: 'mediation', result: res })} />
           </div>
         </>
@@ -629,6 +661,7 @@ function Moderation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>
   }
   return (
     <div>
+      <MethodologyCard m={METHODS.moderation} />
       <div className="pick-row">
         <Pick all={numeric} val={x} set={setX} label="X (focal predictor)" />
         <Pick all={numeric.filter(v => v !== x)} val={w} set={setW} label="W (moderator)" />
@@ -659,7 +692,7 @@ function Moderation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>
             ))}</tbody>
           </table>
           <div className="result-actions">
-            <AIWriteup analysis="moderation analysis (PROCESS Model 1)" result={res} />
+            <AIWriteup analysis="moderation analysis (PROCESS Model 1)" result={res} methodId="moderation" />
             <CaptureBtn onClick={() => onCapture({ kind: 'moderation', result: res })} />
           </div>
         </>
