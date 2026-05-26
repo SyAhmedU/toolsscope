@@ -188,3 +188,24 @@ table.corr td.corr-empty { background: var(--bg-soft); }
 [data-theme='dark'] .es-small { color: #fbbf24; }
 [data-theme='dark'] .es-medium { color: #60a5fa; }
 [data-theme='dark'] .es-large { color: #34d399; }
+
+/* ---- v3: suggestions panel ------------------------------------------------ */
+.suggest { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-elev); margin: 14px 0; box-shadow: var(--shadow-sm); overflow: hidden; }
+.suggest-head { background: linear-gradient(180deg, color-mix(in srgb, var(--accent-warm-b) 8%, transparent), transparent); border-bottom: 1px solid var(--line-soft); }
+.suggest-toggle { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: transparent; border: 0; cursor: pointer; color: var(--ink); text-align: left; }
+.suggest-toggle:hover { background: color-mix(in srgb, var(--accent-warm-b) 6%, transparent); }
+.suggest-chev { font-size: 12px; color: var(--ink-mute); }
+.suggest-title { font-family: var(--display); font-weight: 700; font-size: 15px; flex: 1; }
+.suggest-warnings { list-style: none; margin: 0; padding: 10px 16px; background: color-mix(in srgb, var(--warn) 8%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--warn) 24%, transparent); font-size: 13px; color: var(--warn); }
+.suggest-warnings li { margin: 4px 0; }
+.suggest-list { list-style: none; margin: 0; padding: 8px 16px 16px; display: grid; gap: 10px; counter-reset: srow; }
+.suggest-row { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--bg); }
+.suggest-row-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.suggest-badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: var(--bg-soft); color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.suggest-row-title { font-weight: 700; font-size: 14.5px; flex: 1; min-width: 200px; }
+.suggest-run { margin-left: auto; }
+.suggest-reason { margin-top: 8px; font-size: 13px; color: var(--ink-soft); line-height: 1.55; }
+.suggest-why { background: none; border: 0; color: var(--accent-warm-b); cursor: pointer; padding: 0 0 0 6px; font: inherit; font-size: 12.5px; text-decoration: underline; }
+.suggest-why-panel { margin-top: 10px; padding: 10px 12px; background: var(--bg-soft); border-radius: 8px; font-size: 12.5px; display: grid; gap: 8px; }
+.suggest-why-panel ul { margin: 4px 0 0 0; padding-left: 18px; }
+.suggest-why-panel ul li { margin-bottom: 4px; }

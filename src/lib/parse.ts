@@ -119,3 +119,135 @@ export function buildDataset(matrix: string[][], name: string, source: Dataset['
 export function column(ds: Dataset, name: string): Cell[] {
   return ds.rows.map(r => r[name] ?? null);
 }
+
+// ---- Cadence-native ingest ---------------------------------------------------
+//
+// Cadence's "Download my data" JSON (and the study-level aggregate built from
+// participants merging their files in the Analytics tab) carries a per-response
+// `questions[]` block with `scaleAbbr`, `dim`, `reversed`, and `answer` — far
+// richer than a flat CSV. We import that shape natively so:
+//   • each scale item becomes one column with metadata (scale, dim, reversed)
+//   • reverse-keyed items are silently recoded on the way in (one less landmine)
+//   • the recommender immediately knows which items to group for Cronbach's α
+//   • waveNum is tagged so the recommender can suggest paired tests
+//
+// Both shapes are accepted:
+//   single participant: { completedWaves, responses: [...] }
+//   study aggregate:    [ ... ]  (just the responses array)
+
+interface CadenceQuestion {
+  idx: number;
+  scaleAbbr?: string;
+  text?: string;
+  dim?: string | null;
+  reversed?: boolean;
+  answer?: number;
+}
+interface CadenceResponse {
+  studyId?: string;
+  participantCode?: string;
+  waveNum?: number;
+  completedAt?: string;
+  startedAt?: string;
+  questions?: CadenceQuestion[];
+}
+
+export function isCadenceJson(text: string): boolean {
+  try {
+    const o = JSON.parse(text);
+    const arr = Array.isArray(o) ? o : (o && Array.isArray(o.responses) ? o.responses : null);
+    if (!arr || arr.length === 0) return false;
+    const first = arr[0];
+    return !!(first && Array.isArray(first.questions) && first.questions.length > 0
+      && first.questions[0] && typeof first.questions[0].idx === 'number');
+  } catch { return false; }
+}
+
+export function buildDatasetFromCadence(text: string, name: string): Dataset {
+  const parsed = JSON.parse(text);
+  const responses: CadenceResponse[] = Array.isArray(parsed) ? parsed : (parsed?.responses ?? []);
+  if (responses.length === 0) throw new Error('Cadence file has no responses.');
+
+  // Build the canonical question schema from the union of every response's
+  // questions[] (some participants may have skipped optional demographic items).
+  // Key on `idx` so the order is preserved; carry the metadata of the first
+  // response that defined it.
+  const schema = new Map<number, CadenceQuestion>();
+  for (const r of responses) {
+    for (const q of (r.questions ?? [])) {
+      if (!schema.has(q.idx)) schema.set(q.idx, q);
+    }
+  }
+  const qList = [...schema.values()].sort((a, b) => a.idx - b.idx);
+
+  // Detect the Likert ceiling per scale so reverse-recoding uses the right max
+  // (Cadence's standard scales run 1–7; demographic items have other shapes).
+  const scaleMax = new Map<string, number>();
+  for (const r of responses) {
+    for (const q of (r.questions ?? [])) {
+      if (typeof q.answer !== 'number' || q.answer < 1) continue;
+      const key = q.scaleAbbr || 'Custom';
+      scaleMax.set(key, Math.max(scaleMax.get(key) ?? 7, q.answer));
+    }
+  }
+
+  // Column names. Prefer `<ABBR>_<dim>_<n>` when dim is present so reliability
+  // suggestions can sub-group by subscale; fall back to `<ABBR>_q<n>`.
+  function colName(q: CadenceQuestion): string {
+    const abbr = (q.scaleAbbr || 'Q').replace(/[^A-Za-z0-9]+/g, '');
+    const dim = q.dim ? '_' + q.dim.replace(/[^A-Za-z0-9]+/g, '') : '';
+    return `${abbr}${dim}_q${q.idx + 1}`;
+  }
+  const colMap = new Map<number, string>();
+  qList.forEach(q => colMap.set(q.idx, colName(q)));
+
+  // Assemble rows. Meta columns first, then one column per question.
+  const rows: Record<string, Cell>[] = responses.map(r => {
+    const obj: Record<string, Cell> = {
+      participantCode: r.participantCode ?? null,
+      waveNum: typeof r.waveNum === 'number' ? r.waveNum : null,
+      completedAt: r.completedAt ?? null,
+    };
+    const byIdx = new Map<number, CadenceQuestion>();
+    for (const q of (r.questions ?? [])) byIdx.set(q.idx, q);
+    for (const sq of qList) {
+      const col = colMap.get(sq.idx)!;
+      const q = byIdx.get(sq.idx);
+      const a = q && typeof q.answer === 'number' ? q.answer : null;
+      if (a === null || a < 1) { obj[col] = null; continue; }
+      if (sq.reversed) {
+        const max = scaleMax.get(sq.scaleAbbr || 'Custom') ?? 7;
+        obj[col] = (max + 1) - a;
+      } else {
+        obj[col] = a;
+      }
+    }
+    return obj;
+  });
+
+  // Variable metadata.
+  const variables: Variable[] = [
+    { name: 'participantCode', type: 'id', missing: rows.filter(r => r.participantCode == null).length },
+    { name: 'waveNum', type: 'numeric', missing: rows.filter(r => r.waveNum == null).length, cadenceWaveCol: true },
+    { name: 'completedAt', type: 'text', missing: rows.filter(r => r.completedAt == null).length },
+    ...qList.map<Variable>(q => {
+      const col = colMap.get(q.idx)!;
+      const values = rows.map(r => r[col]).filter(v => typeof v === 'number') as number[];
+      const min = values.length ? Math.min(...values) : 1;
+      const max = Math.max(scaleMax.get(q.scaleAbbr || 'Custom') ?? 7, values.length ? Math.max(...values) : 7);
+      return {
+        name: col,
+        type: 'likert',
+        likertMin: min,
+        likertMax: max,
+        missing: rows.filter(r => r[col] == null).length,
+        cadenceScaleAbbr: q.scaleAbbr || 'Custom',
+        cadenceDim: q.dim || undefined,
+        cadenceReversed: !!q.reversed,
+      };
+    }),
+  ];
+
+  const studyId = responses[0]?.studyId;
+  return { name, source: 'cadence', variables, rows, cadenceStudyId: studyId };
+}

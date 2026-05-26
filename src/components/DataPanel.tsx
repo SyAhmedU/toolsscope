@@ -4,7 +4,7 @@
 
 import { useRef, useState } from 'react';
 import type { Dataset, VarType } from '../lib/types';
-import { parseDelimited, parseXlsx, buildDataset } from '../lib/parse';
+import { parseDelimited, parseXlsx, buildDataset, isCadenceJson, buildDatasetFromCadence } from '../lib/parse';
 import { buildDemo } from '../lib/demo';
 
 const TYPES: VarType[] = ['numeric', 'likert', 'categorical', 'text', 'id'];
@@ -20,12 +20,17 @@ export default function DataPanel({ dataset, onChange }: { dataset: Dataset | nu
   async function onFile(f: File) {
     setErr('');
     try {
+      const base = f.name.replace(/\.[^.]+$/, '');
       if (/\.xlsx?$/i.test(f.name)) {
         const buf = await f.arrayBuffer();
-        onChange(buildDataset(await parseXlsx(buf), f.name.replace(/\.[^.]+$/, ''), 'upload'));
+        onChange(buildDataset(await parseXlsx(buf), base, 'upload'));
+      } else if (/\.json$/i.test(f.name)) {
+        const text = await f.text();
+        if (!isCadenceJson(text)) throw new Error('JSON file is not a recognized Cadence export.');
+        onChange(buildDatasetFromCadence(text, base));
       } else {
         const text = await f.text();
-        onChange(buildDataset(parseDelimited(text), f.name.replace(/\.[^.]+$/, ''), 'upload'));
+        onChange(buildDataset(parseDelimited(text), base, 'upload'));
       }
     } catch (e) { setErr(String((e as Error).message || e)); }
   }
@@ -34,7 +39,12 @@ export default function DataPanel({ dataset, onChange }: { dataset: Dataset | nu
     setErr('');
     try {
       if (!paste.trim()) return;
-      onChange(buildDataset(parseDelimited(paste), 'Pasted data', 'paste'));
+      // Auto-detect: Cadence JSON gets the native ingest, otherwise CSV/TSV.
+      if (isCadenceJson(paste)) {
+        onChange(buildDatasetFromCadence(paste, 'Cadence study'));
+      } else {
+        onChange(buildDataset(parseDelimited(paste), 'Pasted data', 'paste'));
+      }
     } catch (e) { setErr(String((e as Error).message || e)); }
   }
 
@@ -47,7 +57,7 @@ export default function DataPanel({ dataset, onChange }: { dataset: Dataset | nu
     <div>
       <div className="data-actions">
         <button className="btn primary" onClick={() => fileRef.current?.click()}>⬆ Upload CSV / Excel</button>
-        <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls" style={{ display: 'none' }}
+        <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.json" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
         <button className="btn" onClick={() => onChange(buildDemo())}>Load demo dataset</button>
         {dataset && <button className="btn ghost" onClick={() => onChange(null)}>Clear</button>}

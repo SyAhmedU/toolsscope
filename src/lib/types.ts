@@ -24,6 +24,11 @@ export interface Variable {
   // likert metadata when detected
   likertMin?: number;
   likertMax?: number;
+  // Cadence-derived metadata (set when imported from a Cadence "Download my data" file)
+  cadenceScaleAbbr?: string;    // groups items into a multi-item scale
+  cadenceDim?: string;          // sub-dimension within the scale
+  cadenceReversed?: boolean;    // already reverse-recoded on import
+  cadenceWaveCol?: boolean;     // marks waveNum column for repeated-measures workflows
 }
 
 export interface Dataset {
@@ -31,6 +36,7 @@ export interface Dataset {
   source: 'upload' | 'paste' | 'cadence' | 'demo';
   variables: Variable[];
   rows: Record<string, Cell>[];
+  cadenceStudyId?: string;        // when source = 'cadence'
 }
 
 // ---- Analysis result shapes (rendered by the Analyze view, narrated by AI) ----

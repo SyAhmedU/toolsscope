@@ -3,9 +3,11 @@
 // the control surface + result tables + AI "write-up" + a "Capture for report"
 // button that pushes the result into the session report builder.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Cell, Dataset } from '../lib/types';
 import type { ReportEntry } from '../lib/report';
+import type { AnalyzePreset } from '../lib/recommender';
+import { presetTab } from '../lib/recommender';
 import { column } from '../lib/parse';
 import {
   describe, cronbach, correlationMatrix, independentTTest, pairedTTest,
@@ -35,8 +37,15 @@ const KINDS: { key: Kind; label: string }[] = [
   { key: 'moderation', label: 'Moderation' },
 ];
 
-export default function Analyze({ dataset, onCapture }: { dataset: Dataset; onCapture: (e: ReportEntry) => void }) {
+export default function Analyze({ dataset, onCapture, preset, onPresetApplied }: { dataset: Dataset; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [kind, setKind] = useState<Kind>('descriptives');
+
+  // If the parent gave us a recommendation preset, switch to the right section.
+  // Each section reads `preset` and seeds its own state via a useEffect.
+  useEffect(() => {
+    if (!preset) return;
+    setKind(presetTab(preset) as Kind);
+  }, [preset]);
 
   const numeric = dataset.variables.filter(v => v.type === 'numeric' || v.type === 'likert').map(v => v.name);
   const cats = dataset.variables.filter(v => v.type === 'categorical');
@@ -57,17 +66,17 @@ export default function Analyze({ dataset, onCapture }: { dataset: Dataset; onCa
         ))}
       </div>
 
-      {kind === 'descriptives' && <Descriptives cols={cols} numeric={numeric} onCapture={onCapture} />}
-      {kind === 'reliability' && <Reliability cols={cols} numeric={numeric} onCapture={onCapture} />}
-      {kind === 'correlation' && <Correlation cols={cols} numeric={numeric} onCapture={onCapture} />}
-      {kind === 'ttest' && <TTest cols={cols} numeric={numeric} cats2={cats2} onCapture={onCapture} />}
-      {kind === 'anova' && <Anova cols={cols} numeric={numeric} catNames={catNames} onCapture={onCapture} />}
-      {kind === 'regression' && <Regression cols={cols} numeric={numeric} onCapture={onCapture} />}
-      {kind === 'chisquare' && <ChiSq cols={cols} catNames={catNames} onCapture={onCapture} />}
-      {kind === 'factor' && <Factor cols={cols} numeric={numeric} onCapture={onCapture} />}
-      {kind === 'nonparam' && <Nonparam cols={cols} numeric={numeric} cats2={cats2} catNames={catNames} onCapture={onCapture} />}
-      {kind === 'mediation' && <Mediation cols={cols} numeric={numeric} onCapture={onCapture} />}
-      {kind === 'moderation' && <Moderation cols={cols} numeric={numeric} onCapture={onCapture} />}
+      {kind === 'descriptives' && <Descriptives cols={cols} numeric={numeric} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'reliability' && <Reliability cols={cols} numeric={numeric} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'correlation' && <Correlation cols={cols} numeric={numeric} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'ttest' && <TTest cols={cols} numeric={numeric} cats2={cats2} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'anova' && <Anova cols={cols} numeric={numeric} catNames={catNames} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'regression' && <Regression cols={cols} numeric={numeric} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'chisquare' && <ChiSq cols={cols} catNames={catNames} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'factor' && <Factor cols={cols} numeric={numeric} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'nonparam' && <Nonparam cols={cols} numeric={numeric} cats2={cats2} catNames={catNames} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'mediation' && <Mediation cols={cols} numeric={numeric} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
+      {kind === 'moderation' && <Moderation cols={cols} numeric={numeric} onCapture={onCapture} preset={preset} onPresetApplied={onPresetApplied} />}
     </div>
   );
 }
@@ -156,8 +165,9 @@ function tripleComplete(a: Cell[], b: Cell[], c: Cell[]): { x: number[]; m: numb
 }
 
 // ---- Descriptives ------------------------------------------------------------
-function Descriptives({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void }) {
+function Descriptives({ cols, numeric, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [sel, setSel] = useState<string[]>(numeric.slice(0, 6));
+  useEffect(() => { if (preset?.kind === 'descriptives') { setSel(preset.vars); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   const rows = sel.map(v => describe(v, cols[v]));
   return (
     <div>
@@ -182,8 +192,9 @@ function Descriptives({ cols, numeric, onCapture }: { cols: Record<string, Cell[
 }
 
 // ---- Reliability -------------------------------------------------------------
-function Reliability({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void }) {
+function Reliability({ cols, numeric, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [sel, setSel] = useState<string[]>([]);
+  useEffect(() => { if (preset?.kind === 'reliability') { setSel(preset.items); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   const res = sel.length >= 2 ? cronbach(cols, sel) : null;
   return (
     <div>
@@ -213,9 +224,10 @@ function Reliability({ cols, numeric, onCapture }: { cols: Record<string, Cell[]
 }
 
 // ---- Correlation -------------------------------------------------------------
-function Correlation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void }) {
+function Correlation({ cols, numeric, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [sel, setSel] = useState<string[]>(numeric.slice(0, 5));
   const [method, setMethod] = useState<'pearson' | 'spearman'>('pearson');
+  useEffect(() => { if (preset?.kind === 'correlation') { setSel(preset.vars); setMethod(preset.method); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   const res = sel.length >= 2 ? correlationMatrix(cols, sel, method) : null;
   return (
     <div>
@@ -247,10 +259,11 @@ function Correlation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]
 }
 
 // ---- t-test ------------------------------------------------------------------
-function TTest({ cols, numeric, cats2, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; cats2: string[]; onCapture: (e: ReportEntry) => void }) {
+function TTest({ cols, numeric, cats2, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; cats2: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [mode, setMode] = useState<'independent' | 'paired'>('independent');
   const [dv, setDv] = useState(''); const [grp, setGrp] = useState('');
   const [x, setX] = useState(''); const [y, setY] = useState('');
+  useEffect(() => { if (preset?.kind === 'ttest') { setMode(preset.mode); setDv(preset.dv ?? ''); setGrp(preset.grp ?? ''); setX(preset.x ?? ''); setY(preset.y ?? ''); onPresetApplied?.(); } }, [preset, onPresetApplied]);
 
   let res = null, levels: string[] = [];
   let groupA: number[] = [], groupB: number[] = [];      // for normality nudge
@@ -317,8 +330,9 @@ function TTest({ cols, numeric, cats2, onCapture }: { cols: Record<string, Cell[
 }
 
 // ---- ANOVA -------------------------------------------------------------------
-function Anova({ cols, numeric, catNames, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; catNames: string[]; onCapture: (e: ReportEntry) => void }) {
+function Anova({ cols, numeric, catNames, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; catNames: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [dv, setDv] = useState(''); const [factor, setFactor] = useState('');
+  useEffect(() => { if (preset?.kind === 'anova') { setDv(preset.dv); setFactor(preset.factor); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   let res = null;
   if (dv && factor) {
     const levels = [...new Set(cols[factor].filter(c => c !== null && c !== '').map(String))].sort();
@@ -364,8 +378,9 @@ function Anova({ cols, numeric, catNames, onCapture }: { cols: Record<string, Ce
 }
 
 // ---- Regression --------------------------------------------------------------
-function Regression({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void }) {
+function Regression({ cols, numeric, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [dv, setDv] = useState(''); const [preds, setPreds] = useState<string[]>([]);
+  useEffect(() => { if (preset?.kind === 'regression') { setDv(preset.dv); setPreds(preset.preds); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   let res = null;
   if (dv && preds.length >= 1 && !preds.includes(dv)) {
     const y: number[] = []; const X: number[][] = [];
@@ -406,8 +421,9 @@ function Regression({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>
 }
 
 // ---- Chi-square --------------------------------------------------------------
-function ChiSq({ cols, catNames, onCapture }: { cols: Record<string, Cell[]>; catNames: string[]; onCapture: (e: ReportEntry) => void }) {
+function ChiSq({ cols, catNames, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; catNames: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [rowV, setRowV] = useState(''); const [colV, setColV] = useState('');
+  useEffect(() => { if (preset?.kind === 'chisquare') { setRowV(preset.rowV); setColV(preset.colV); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   const res = rowV && colV && rowV !== colV ? chiSquare(rowV, colV, cols[rowV], cols[colV]) : null;
   return (
     <div>
@@ -441,11 +457,12 @@ function ChiSq({ cols, catNames, onCapture }: { cols: Record<string, Cell[]>; ca
 }
 
 // ---- Factor analysis ---------------------------------------------------------
-function Factor({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void }) {
+function Factor({ cols, numeric, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [sel, setSel] = useState<string[]>([]);
   const [method, setMethod] = useState<'pca' | 'efa'>('pca');
   const [rotation, setRotation] = useState<'none' | 'varimax'>('varimax');
   const [forced, setForced] = useState<string>('');  // empty = Kaiser default
+  useEffect(() => { if (preset?.kind === 'factor') { setSel(preset.items); setMethod(preset.method); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   const res = sel.length >= 3
     ? factorAnalysis(cols, sel, { method, rotation, nFactors: forced ? Math.max(1, Number(forced) | 0) : undefined })
     : null;
@@ -500,10 +517,11 @@ function Factor({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; nu
 }
 
 // ---- Nonparametric -----------------------------------------------------------
-function Nonparam({ cols, numeric, cats2, catNames, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; cats2: string[]; catNames: string[]; onCapture: (e: ReportEntry) => void }) {
+function Nonparam({ cols, numeric, cats2, catNames, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; cats2: string[]; catNames: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [test, setTest] = useState<'mann' | 'wilcoxon' | 'kw'>('mann');
   const [dv, setDv] = useState(''); const [grp, setGrp] = useState('');
   const [x, setX] = useState(''); const [y, setY] = useState('');
+  useEffect(() => { if (preset?.kind === 'nonparam') { setTest(preset.test); setDv(preset.dv ?? ''); setGrp(preset.grp ?? ''); setX(preset.x ?? ''); setY(preset.y ?? ''); onPresetApplied?.(); } }, [preset, onPresetApplied]);
 
   let mwRes = null, wilRes = null, kwRes = null;
   let mwLevels: string[] = [];
@@ -608,8 +626,9 @@ function Nonparam({ cols, numeric, cats2, catNames, onCapture }: { cols: Record<
 }
 
 // ---- Mediation ---------------------------------------------------------------
-function Mediation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void }) {
+function Mediation({ cols, numeric, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [x, setX] = useState(''); const [m, setM] = useState(''); const [y, setY] = useState('');
+  useEffect(() => { if (preset?.kind === 'mediation') { setX(preset.x); setM(preset.m); setY(preset.y); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   let res = null;
   if (x && m && y && x !== m && m !== y && x !== y) {
     const { x: xa, m: ma, y: ya } = tripleComplete(cols[x], cols[m], cols[y]);
@@ -652,8 +671,9 @@ function Mediation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>;
 }
 
 // ---- Moderation --------------------------------------------------------------
-function Moderation({ cols, numeric, onCapture }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void }) {
+function Moderation({ cols, numeric, onCapture, preset, onPresetApplied }: { cols: Record<string, Cell[]>; numeric: string[]; onCapture: (e: ReportEntry) => void; preset?: AnalyzePreset | null; onPresetApplied?: () => void }) {
   const [x, setX] = useState(''); const [w, setW] = useState(''); const [y, setY] = useState('');
+  useEffect(() => { if (preset?.kind === 'moderation') { setX(preset.x); setW(preset.w); setY(preset.y); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   let res = null;
   if (x && w && y && x !== w && w !== y && x !== y) {
     const { x: xa, m: wa, y: ya } = tripleComplete(cols[x], cols[w], cols[y]);

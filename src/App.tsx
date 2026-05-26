@@ -4,11 +4,14 @@ import DataPanel from './components/DataPanel';
 import Analyze from './components/Analyze';
 import Visualize from './components/Visualize';
 import Qual from './components/Qual';
+import Suggestions from './components/Suggestions';
 import type { Dataset } from './lib/types';
 import { loadDataset, saveDataset, clearDataset } from './lib/store';
 import { loadQualProject } from './lib/qual';
 import type { ReportEntry, ReportMeta } from './lib/report';
 import { buildReport, downloadBlob } from './lib/report';
+import type { AnalyzePreset, Recommendation } from './lib/recommender';
+import { buildJournalTimePayload, sendToJournalTime } from './lib/handoff';
 
 type Tab = 'data' | 'analyze' | 'visualize' | 'qual';
 
@@ -19,6 +22,7 @@ export default function App() {
   const [reportTitle, setReportTitle] = useState('Untitled study');
   const [reportAuthor, setReportAuthor] = useState('');
   const [building, setBuilding] = useState(false);
+  const [preset, setPreset] = useState<AnalyzePreset | null>(null);
 
   useEffect(() => {
     if (dataset) saveDataset(dataset); else clearDataset();
@@ -28,11 +32,34 @@ export default function App() {
     setDataset(d);
     if (d) setTab('analyze');
   }
+  function runRecommendation(rec: Recommendation) {
+    setPreset(rec.preset);
+    setTab('analyze');
+  }
   function addEntry(e: ReportEntry) {
     // Dedup: keep most recent of each (kind, key) so the user can re-run an
     // analysis and have the new numbers replace the old in the report.
     const key = JSON.stringify({ k: e.kind, h: keyFor(e) });
     setEntries(prev => [...prev.filter(p => JSON.stringify({ k: p.kind, h: keyFor(p) }) !== key), e]);
+  }
+
+  function handoffToJournalTime() {
+    const all: ReportEntry[] = [...entries];
+    const qp = loadQualProject();
+    if ((qp.docs.length || qp.codes.length) && !all.some(e => e.kind === 'qual')) all.push({ kind: 'qual', project: qp });
+    if (all.length === 0) {
+      alert('Capture at least one analysis (or qualitative project) before sending to JournalTime.');
+      return;
+    }
+    const meta: ReportMeta = {
+      title: reportTitle || 'Untitled study',
+      author: reportAuthor || 'ToolsScope user',
+      dataset: dataset?.name ?? '(no quantitative dataset)',
+      n: dataset?.rows.length ?? 0,
+      variables: dataset?.variables.length ?? 0,
+    };
+    const payload = buildJournalTimePayload(all, meta, { topic: reportTitle });
+    sendToJournalTime(payload);
   }
 
   async function exportReport() {
@@ -90,6 +117,9 @@ export default function App() {
           <button className="btn primary" onClick={exportReport} disabled={building}>
             {building ? 'Building…' : '⬇ Export Word report'}
           </button>
+          <button className="btn" onClick={handoffToJournalTime} title="Open JournalTime with this study's Methods + Results pre-filled">
+            ✍ Send to JournalTime
+          </button>
           {entries.length > 0 && (
             <button className="btn ghost" onClick={() => setEntries([])}>Clear captured</button>
           )}
@@ -103,8 +133,10 @@ export default function App() {
           ))}
         </nav>
 
+        {dataset && <Suggestions dataset={dataset} onRun={runRecommendation} />}
+
         {tab === 'data' && <DataPanel dataset={dataset} onChange={update} />}
-        {tab === 'analyze' && dataset && <Analyze dataset={dataset} onCapture={addEntry} />}
+        {tab === 'analyze' && dataset && <Analyze dataset={dataset} onCapture={addEntry} preset={preset} onPresetApplied={() => setPreset(null)} />}
         {tab === 'visualize' && dataset && <Visualize dataset={dataset} />}
         {tab === 'qual' && <Qual />}
         {(tab === 'analyze' || tab === 'visualize') && !dataset && <div className="empty-hint"><p>Load a dataset first (Data tab).</p></div>}
