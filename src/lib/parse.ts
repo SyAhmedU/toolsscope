@@ -225,11 +225,100 @@ export function buildDatasetFromCadence(text: string, name: string): Dataset {
     return obj;
   });
 
+  // ── Auto-compute scale composites ────────────────────────────────────
+  // For every (scale, dim) group with ≥2 items we add a column whose value
+  // is the participant's mean across the (already reverse-recoded) items.
+  // Mirrors the reliability recommender's grouping: prefer subscale-level
+  // composites when subdimensions exist, else fall back to scale-level —
+  // so UWES gets `UWES_vigor` + `UWES_dedication` (not a meaningless umbrella
+  // mean), while a 1-dim scale like PSS gets a single `PSS` composite.
+  //
+  // Composites land between meta and raw items in the variable list so they
+  // surface immediately in Data preview, the recommender, and Visualize.
+  interface CompositeSpec { name: string; scaleAbbr: string; dim?: string; itemCols: string[]; max: number }
+  const composites: CompositeSpec[] = [];
+
+  // Subscale-level groups (scale + dim).
+  const subscaleGroups = new Map<string, { scaleAbbr: string; dim: string; qs: CadenceQuestion[] }>();
+  const scaleGroups = new Map<string, CadenceQuestion[]>();
+  for (const q of qList) {
+    if (!q.scaleAbbr) continue;
+    const key = q.scaleAbbr;
+    if (!scaleGroups.has(key)) scaleGroups.set(key, []);
+    scaleGroups.get(key)!.push(q);
+    if (q.dim) {
+      const dk = `${key}::${q.dim}`;
+      if (!subscaleGroups.has(dk)) subscaleGroups.set(dk, { scaleAbbr: key, dim: q.dim, qs: [] });
+      subscaleGroups.get(dk)!.qs.push(q);
+    }
+  }
+  // Prefer subscale composites; mark their parent scale so we don't also emit
+  // the (less informative) umbrella mean.
+  const subscaledScales = new Set<string>();
+  for (const { scaleAbbr, dim, qs } of subscaleGroups.values()) {
+    if (qs.length < 2) continue;
+    const abbr = scaleAbbr.replace(/[^A-Za-z0-9]+/g, '');
+    const cleanDim = dim.replace(/[^A-Za-z0-9]+/g, '');
+    composites.push({
+      name: `${abbr}_${cleanDim}`,
+      scaleAbbr,
+      dim,
+      itemCols: qs.map(q => colMap.get(q.idx)!),
+      max: scaleMax.get(scaleAbbr) ?? 7,
+    });
+    subscaledScales.add(scaleAbbr);
+  }
+  for (const [scaleAbbr, qs] of scaleGroups) {
+    if (qs.length < 2) continue;
+    if (subscaledScales.has(scaleAbbr)) continue;
+    const abbr = scaleAbbr.replace(/[^A-Za-z0-9]+/g, '');
+    composites.push({
+      name: abbr,
+      scaleAbbr,
+      itemCols: qs.map(q => colMap.get(q.idx)!),
+      max: scaleMax.get(scaleAbbr) ?? 7,
+    });
+  }
+  // Guard against accidental name collision with a raw-item column.
+  const usedNames = new Set(qList.map(q => colMap.get(q.idx)!));
+  for (const c of composites) {
+    let n = c.name, suffix = 2;
+    while (usedNames.has(n)) n = `${c.name}_c${suffix++}`;
+    c.name = n;
+    usedNames.add(n);
+  }
+
+  // Populate composite values per response. Mean of non-null items; require
+  // ≥50% of items present to emit a value (matches common scoring rules and
+  // avoids a single-item participant skewing the composite).
+  for (const row of rows) {
+    for (const c of composites) {
+      const vals: number[] = [];
+      for (const col of c.itemCols) {
+        const v = row[col];
+        if (typeof v === 'number') vals.push(v);
+      }
+      const need = Math.ceil(c.itemCols.length / 2);
+      row[c.name] = vals.length >= need ? vals.reduce((s, x) => s + x, 0) / vals.length : null;
+    }
+  }
+
   // Variable metadata.
   const variables: Variable[] = [
     { name: 'participantCode', type: 'id', missing: rows.filter(r => r.participantCode == null).length },
     { name: 'waveNum', type: 'numeric', missing: rows.filter(r => r.waveNum == null).length, cadenceWaveCol: true },
     { name: 'completedAt', type: 'text', missing: rows.filter(r => r.completedAt == null).length },
+    ...composites.map<Variable>(c => ({
+      name: c.name,
+      type: 'numeric',
+      likertMin: 1,
+      likertMax: c.max,
+      missing: rows.filter(r => r[c.name] == null).length,
+      cadenceScaleAbbr: c.scaleAbbr,
+      cadenceDim: c.dim,
+      cadenceComposite: true,
+      cadenceCompositeItems: c.itemCols,
+    })),
     ...qList.map<Variable>(q => {
       const col = colMap.get(q.idx)!;
       const values = rows.map(r => r[col]).filter(v => typeof v === 'number') as number[];

@@ -29,6 +29,8 @@ export interface Variable {
   cadenceDim?: string;          // sub-dimension within the scale
   cadenceReversed?: boolean;    // already reverse-recoded on import
   cadenceWaveCol?: boolean;     // marks waveNum column for repeated-measures workflows
+  cadenceComposite?: boolean;   // auto-computed mean composite (UWES_vigor, etc.)
+  cadenceCompositeItems?: string[]; // raw item column names that fed into this composite
 }
 
 export interface Dataset {

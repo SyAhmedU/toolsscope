@@ -12,6 +12,9 @@ import type { ReportEntry, ReportMeta } from './lib/report';
 import { buildReport, downloadBlob } from './lib/report';
 import type { AnalyzePreset, Recommendation } from './lib/recommender';
 import { buildJournalTimePayload, sendToJournalTime } from './lib/handoff';
+import { buildDatasetFromCadence, isCadenceJson } from './lib/parse';
+import type { ResearchPack } from './lib/researchpack';
+import { decodeResearchPack, saveResearchPack, loadResearchPack, clearResearchPack } from './lib/researchpack';
 
 type Tab = 'data' | 'analyze' | 'visualize' | 'qual';
 
@@ -23,10 +26,55 @@ export default function App() {
   const [reportAuthor, setReportAuthor] = useState('');
   const [building, setBuilding] = useState(false);
   const [preset, setPreset] = useState<AnalyzePreset | null>(null);
+  const [researchPack, setResearchPack] = useState<ResearchPack | null>(() => loadResearchPack());
 
   useEffect(() => {
     if (dataset) saveDataset(dataset); else clearDataset();
   }, [dataset]);
+
+  // Inbound handoffs. ToolsScope accepts up to two simultaneous fragments in
+  // the URL hash:
+  //   #pack=<b64>     — ResearchPack from researchflow (or forwarded by cadence)
+  //   #cadence=<b64>  — Cadence study aggregate responses
+  // When both are present (Cadence Analytics → ToolsScope after the user came
+  // through researchflow), the pack arrives alongside the data so planned
+  // tests still highlight. We handle them in one effect so the hash-clear at
+  // the end doesn't race the two consumers.
+  useEffect(() => {
+    const hash = location.hash;
+    let touched = false;
+    try {
+      const pm = hash.match(/[#&]pack=([^&]+)/);
+      if (pm) {
+        const pack = decodeResearchPack(pm[1]);
+        if (pack) {
+          saveResearchPack(pack);
+          setResearchPack(pack);
+          setReportTitle(prev => (prev === 'Untitled study' && pack.title) ? pack.title : prev);
+          touched = true;
+        }
+      }
+    } catch (e) { console.warn('ResearchPack handoff failed:', e); }
+    try {
+      const cm = hash.match(/[#&]cadence=([^&]+)/);
+      if (cm) {
+        const pad = '='.repeat((4 - (cm[1].length % 4)) % 4);
+        const norm = cm[1].replace(/-/g, '+').replace(/_/g, '/') + pad;
+        const bin = atob(norm);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const json = new TextDecoder().decode(bytes);
+        if (isCadenceJson(json)) {
+          const ds = buildDatasetFromCadence(json, 'Cadence study (via handoff)');
+          setDataset(ds);
+          setTab('analyze');
+          touched = true;
+        }
+      }
+    } catch (e) { console.warn('Cadence handoff failed:', e); }
+    if (touched) history.replaceState(null, '', location.pathname + location.search);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function update(d: Dataset | null) {
     setDataset(d);
@@ -58,8 +106,20 @@ export default function App() {
       n: dataset?.rows.length ?? 0,
       variables: dataset?.variables.length ?? 0,
     };
-    const payload = buildJournalTimePayload(all, meta, { topic: reportTitle });
+    // Carry the ResearchPack's framing into JournalTime so the Article
+    // Developer opens with topic / gap / field / keywords already filled.
+    const payload = buildJournalTimePayload(all, meta, {
+      topic: reportTitle || researchPack?.title || researchPack?.question,
+      gap: researchPack?.gap,
+      field: researchPack?.field,
+      keywords: researchPack?.keywords,
+    });
     sendToJournalTime(payload);
+  }
+
+  function dismissPack() {
+    clearResearchPack();
+    setResearchPack(null);
   }
 
   async function exportReport() {
@@ -133,7 +193,8 @@ export default function App() {
           ))}
         </nav>
 
-        {dataset && <Suggestions dataset={dataset} onRun={runRecommendation} />}
+        {researchPack && <ResearchPackBanner pack={researchPack} onDismiss={dismissPack} />}
+        {dataset && <Suggestions dataset={dataset} onRun={runRecommendation} pack={researchPack} />}
 
         {tab === 'data' && <DataPanel dataset={dataset} onChange={update} />}
         {tab === 'analyze' && dataset && <Analyze dataset={dataset} onCapture={addEntry} preset={preset} onPresetApplied={() => setPreset(null)} />}
@@ -142,6 +203,28 @@ export default function App() {
         {(tab === 'analyze' || tab === 'visualize') && !dataset && <div className="empty-hint"><p>Load a dataset first (Data tab).</p></div>}
       </div>
     </>
+  );
+}
+
+// Small banner shown above Suggestions when a ResearchPack is loaded. Tells
+// the user where the plan came from + summarises what got carried + lets them
+// dismiss the pack (which also clears localStorage so it doesn't persist into
+// the next unrelated session).
+function ResearchPackBanner({ pack, onDismiss }: { pack: ResearchPack; onDismiss: () => void }) {
+  const planned = pack.analysis?.tests?.length ?? 0;
+  return (
+    <section className="rp-banner">
+      <div className="rp-banner-icon">📦</div>
+      <div className="rp-banner-body">
+        <div className="rp-banner-title">Plan carried from ResearchFlow</div>
+        <div className="rp-banner-meta">
+          {pack.question && <span><strong>Question:</strong> {pack.question.slice(0, 120)}{pack.question.length > 120 ? '…' : ''}</span>}
+          {pack.theory?.name && <span><strong>Framework:</strong> {pack.theory.name}</span>}
+          {planned > 0 && <span><strong>{planned} planned analys{planned === 1 ? 'is' : 'es'}</strong> highlighted below</span>}
+        </div>
+      </div>
+      <button className="rp-banner-dismiss" onClick={onDismiss} aria-label="Dismiss">×</button>
+    </section>
   );
 }
 

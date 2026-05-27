@@ -12,24 +12,42 @@ import type { Dataset } from '../lib/types';
 import { profileDataset } from '../lib/recommender';
 import type { Recommendation } from '../lib/recommender';
 import { METHODS, CITATIONS } from '../lib/methodology';
+import type { ResearchPack } from '../lib/researchpack';
+import { isPlannedTest } from '../lib/researchpack';
 
 export interface SuggestionsApi {
   /** Switches the Analyze tab and applies the preset. */
   onRun: (rec: Recommendation) => void;
 }
 
-export default function Suggestions({ dataset, onRun }: { dataset: Dataset; onRun: SuggestionsApi['onRun'] }) {
+export default function Suggestions({ dataset, onRun, pack }: { dataset: Dataset; onRun: SuggestionsApi['onRun']; pack?: ResearchPack | null }) {
   const report = useMemo(() => profileDataset(dataset), [dataset]);
   const [open, setOpen] = useState(true);
-  const top = report.recommendations.slice(0, 8);
+  // When a ResearchPack is loaded, sort planned tests to the top — the user's
+  // upstream plan trumps the data-driven priority for ordering. Within each
+  // group the recommender's priority still wins.
+  const allRecs = useMemo(() => {
+    if (!pack?.analysis?.tests?.length) return report.recommendations;
+    return [...report.recommendations].sort((a, b) => {
+      const ap = isPlannedTest(pack, a.methodId) ? 0 : 1;
+      const bp = isPlannedTest(pack, b.methodId) ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return b.priority - a.priority;
+    });
+  }, [report.recommendations, pack]);
+  const top = allRecs.slice(0, 8);
   if (top.length === 0 && report.warnings.length === 0) return null;
+  const plannedCount = pack ? top.filter(r => isPlannedTest(pack, r.methodId)).length : 0;
   return (
     <section className={`suggest ${open ? 'open' : ''}`}>
       <header className="suggest-head">
         <button className="suggest-toggle" onClick={() => setOpen(o => !o)} aria-expanded={open}>
           <span className="suggest-chev">{open ? '▾' : '▸'}</span>
           <span className="suggest-title">Suggested analyses</span>
-          <span className="muted small">{top.length} recommendation{top.length === 1 ? '' : 's'} based on your data</span>
+          <span className="muted small">
+            {top.length} recommendation{top.length === 1 ? '' : 's'} based on your data
+            {plannedCount > 0 && ` · ${plannedCount} from your plan`}
+          </span>
         </button>
       </header>
       {open && (
@@ -38,7 +56,7 @@ export default function Suggestions({ dataset, onRun }: { dataset: Dataset; onRu
             <ul className="suggest-warnings">{report.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
           )}
           <ol className="suggest-list">
-            {top.map(r => <SuggestionRow key={r.id} rec={r} onRun={onRun} />)}
+            {top.map(r => <SuggestionRow key={r.id} rec={r} onRun={onRun} planned={pack ? isPlannedTest(pack, r.methodId) : false} />)}
           </ol>
         </>
       )}
@@ -46,12 +64,13 @@ export default function Suggestions({ dataset, onRun }: { dataset: Dataset; onRu
   );
 }
 
-function SuggestionRow({ rec, onRun }: { rec: Recommendation; onRun: (r: Recommendation) => void }) {
+function SuggestionRow({ rec, onRun, planned }: { rec: Recommendation; onRun: (r: Recommendation) => void; planned: boolean }) {
   const [whyOpen, setWhyOpen] = useState(false);
   const m = METHODS[rec.methodId];
   return (
-    <li className="suggest-row">
+    <li className={`suggest-row ${planned ? 'suggest-row-planned' : ''}`}>
       <div className="suggest-row-head">
+        {planned && <span className="suggest-planned-pill" title="This test was in your ResearchFlow plan">📦 Planned</span>}
         <span className="suggest-badge">{m?.name ?? rec.methodId}</span>
         <span className="suggest-row-title">{rec.title}</span>
         <button className="btn primary suggest-run" onClick={() => onRun(rec)}>Run this →</button>

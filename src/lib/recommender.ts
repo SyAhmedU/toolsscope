@@ -35,6 +35,8 @@ export interface VarProfile {
   cadenceScaleAbbr?: string;
   cadenceDim?: string;
   cadenceReversed?: boolean;
+  cadenceComposite?: boolean;
+  cadenceCompositeItems?: string[];
 }
 
 export function profileVariable(ds: Dataset, v: Variable): VarProfile {
@@ -52,6 +54,8 @@ export function profileVariable(ds: Dataset, v: Variable): VarProfile {
     cadenceScaleAbbr: v.cadenceScaleAbbr,
     cadenceDim: v.cadenceDim,
     cadenceReversed: v.cadenceReversed,
+    cadenceComposite: v.cadenceComposite,
+    cadenceCompositeItems: v.cadenceCompositeItems,
   };
   if (v.type === 'numeric' || v.type === 'likert') {
     profile.mean = d.mean; profile.sd = d.sd;
@@ -125,7 +129,18 @@ export function profileDataset(ds: Dataset): ProfileReport {
   const recs: Recommendation[] = [];
   const warnings: string[] = [];
 
-  const numerics = profiles.filter(p => p.type === 'numeric' || p.type === 'likert');
+  const allNumerics = profiles.filter(p => p.type === 'numeric' || p.type === 'likert');
+  // Cadence ingest auto-computes scale composites (UWES_vigor, UWES_dedication, …).
+  // When composites are present they are the right unit of analysis for
+  // inferential tests — raw items are for reliability only. So we hide raw
+  // scale items from t-tests, ANOVA, regression, and correlation when at
+  // least one composite exists; otherwise (CSV uploads, non-Cadence data) we
+  // fall back to the full numeric set.
+  const composites = allNumerics.filter(p => p.cadenceComposite);
+  const rawScaleItems = new Set(allNumerics.filter(p => p.cadenceScaleAbbr && !p.cadenceComposite).map(p => p.name));
+  const numerics = composites.length > 0
+    ? allNumerics.filter(p => p.cadenceComposite || !rawScaleItems.has(p.name))
+    : allNumerics;
   const cats = profiles.filter(p => p.type === 'categorical');
   const cats2 = cats.filter(p => (p.levels ?? 0) === 2);
   const catsMulti = cats.filter(p => (p.levels ?? 0) >= 3);
@@ -280,8 +295,8 @@ export function profileDataset(ds: Dataset): ProfileReport {
     }
   }
 
-  // ------- (8) Factor analysis — when there are many numeric items + N adequate -------
-  const allLikertish = numerics.filter(p => p.type === 'likert' || p.likertMin != null);
+  // ------- (8) Factor analysis — operates on raw Likert ITEMS, never composites -------
+  const allLikertish = allNumerics.filter(p => (p.type === 'likert' || p.likertMin != null) && !p.cadenceComposite);
   // Prefer Cadence scale composites; otherwise any large set of likert-like items.
   if (allLikertish.length >= 6 && N >= Math.max(5 * allLikertish.length, 100)) {
     recs.push({
@@ -295,9 +310,16 @@ export function profileDataset(ds: Dataset): ProfileReport {
     });
   }
 
-  // ------- (9) Wave-aware: Wilcoxon when Cadence waves are present -------
+  // ------- (9) Wave-aware: composites + multiple waves -------
   if (ds.source === 'cadence' && ds.variables.some(v => v.cadenceWaveCol)) {
-    warnings.push('Cadence study with multiple waves detected — once you compute scale composites per wave, the Wilcoxon signed-rank test compares paired waves directly.');
+    const nWaves = new Set(ds.rows.map(r => r.waveNum).filter(v => typeof v === 'number')).size;
+    if (composites.length > 0 && nWaves >= 2) {
+      warnings.push(`Cadence multi-wave study with ${composites.length} auto-computed composite${composites.length === 1 ? '' : 's'} (${composites.slice(0, 4).map(c => c.name).join(', ')}${composites.length > 4 ? '…' : ''}). For paired-wave comparison, filter to two waves and use Wilcoxon signed-rank on the composite column.`);
+    } else if (composites.length > 0) {
+      warnings.push(`${composites.length} scale composite${composites.length === 1 ? '' : 's'} auto-computed from raw items (${composites.slice(0, 4).map(c => c.name).join(', ')}${composites.length > 4 ? '…' : ''}). Use these as your DV — raw items are for reliability only.`);
+    } else {
+      warnings.push('Cadence study with multiple waves detected — once you compute scale composites per wave, the Wilcoxon signed-rank test compares paired waves directly.');
+    }
   }
   void byName;
 
