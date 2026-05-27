@@ -40,8 +40,11 @@ const toggle: React.CSSProperties = {
   cursor: 'pointer', fontSize: '1rem', flexShrink: 0, marginLeft: 4, fontFamily: 'inherit',
 };
 
-type SuiteStep = 'rf' | 'ts' | 'ss' | 'cd' | 'to' | 'jt';
+// Discovery tier (wm, pc) precedes the six-step core pipeline.
+type SuiteStep = 'wm' | 'pc' | 'rf' | 'ts' | 'ss' | 'cd' | 'to' | 'jt';
 const SUITE: { key: SuiteStep; label: string; href: string }[] = [
+  { key: 'wm', label: 'Wordmap', href: 'https://syahmedu.github.io/wordmap/' },
+  { key: 'pc', label: 'PaperCards', href: 'https://papercards.vercel.app' },
   { key: 'rf', label: 'ResearchFlow', href: 'https://researchflow-syahmedus-projects.vercel.app' },
   { key: 'ts', label: 'TheoryScope', href: 'https://theoryscope.vercel.app' },
   { key: 'ss', label: 'ScaleScope', href: 'https://scalescope.vercel.app' },
