@@ -41,8 +41,9 @@ const toggle: React.CSSProperties = {
 };
 
 // Discovery tier (wm, pc) precedes the six-step core pipeline.
-type SuiteStep = 'wm' | 'pc' | 'rf' | 'ts' | 'ss' | 'cd' | 'to' | 'jt';
+type SuiteStep = 'ib' | 'wm' | 'pc' | 'rf' | 'ts' | 'ss' | 'cd' | 'to' | 'jt';
 const SUITE: { key: SuiteStep; label: string; href: string }[] = [
+  { key: 'ib', label: 'IdeaBox',  href: 'https://ideabox-six.vercel.app' },
   { key: 'wm', label: 'Wordmap', href: 'https://syahmedu.github.io/wordmap/' },
   { key: 'pc', label: 'PaperCards', href: 'https://papercards.vercel.app' },
   { key: 'rf', label: 'ResearchFlow', href: 'https://researchflow-syahmedus-projects.vercel.app' },
