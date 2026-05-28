@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import SyedBar from './components/SyedBar';
+import Plan from './components/Plan';
 import DataPanel from './components/DataPanel';
 import Analyze from './components/Analyze';
 import Visualize from './components/Visualize';
@@ -16,11 +17,11 @@ import { buildDatasetFromCadence, isCadenceJson } from './lib/parse';
 import type { ResearchPack } from './lib/researchpack';
 import { decodeResearchPack, saveResearchPack, loadResearchPack, clearResearchPack } from './lib/researchpack';
 
-type Tab = 'data' | 'analyze' | 'visualize' | 'qual';
+type Tab = 'plan' | 'data' | 'analyze' | 'visualize' | 'qual';
 
 export default function App() {
   const [dataset, setDataset] = useState<Dataset | null>(() => loadDataset());
-  const [tab, setTab] = useState<Tab>('data');
+  const [tab, setTab] = useState<Tab>('plan');
   const [entries, setEntries] = useState<ReportEntry[]>([]);
   const [reportTitle, setReportTitle] = useState('Untitled study');
   const [reportAuthor, setReportAuthor] = useState('');
@@ -146,6 +147,7 @@ export default function App() {
   }
 
   const tabs: { key: Tab; label: string; enabled: boolean }[] = [
+    { key: 'plan', label: '✨ Plan', enabled: true },
     { key: 'data', label: 'Data', enabled: true },
     { key: 'analyze', label: 'Analyze', enabled: !!dataset },
     { key: 'visualize', label: 'Visualize', enabled: !!dataset },
@@ -196,6 +198,7 @@ export default function App() {
         {researchPack && <ResearchPackBanner pack={researchPack} onDismiss={dismissPack} />}
         {dataset && <Suggestions dataset={dataset} onRun={runRecommendation} pack={researchPack} />}
 
+        {tab === 'plan' && <Plan datasetReady={!!dataset} />}
         {tab === 'data' && <DataPanel dataset={dataset} onChange={update} />}
         {tab === 'analyze' && dataset && <Analyze dataset={dataset} onCapture={addEntry} preset={preset} onPresetApplied={() => setPreset(null)} />}
         {tab === 'visualize' && dataset && <Visualize dataset={dataset} />}
