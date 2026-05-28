@@ -6,7 +6,7 @@
 // Calls the suite-wide ResearchFlow /api/generate endpoint (same Groq key,
 // same shared backend pattern as cadence/wordmap/papercards Generate panels).
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const RF_GENERATE_URL = 'https://researchflow-syahmedus-projects.vercel.app/api/generate';
 
@@ -25,10 +25,27 @@ interface PlanResult {
 }
 
 export default function Plan({ datasetReady }: { datasetReady: boolean }) {
-  const [text, setText] = useState('');
+  // Quick Start hand-off: ?plan=<topic> drops the topic in here and auto-
+  // generates so users land on a populated plan instead of a blank textarea.
+  const initialQ = (() => {
+    try {
+      const q = new URLSearchParams(location.search).get('plan') || '';
+      if (q) history.replaceState(null, '', location.pathname + location.hash);
+      return q;
+    } catch { return ''; }
+  })();
+  const [text, setText] = useState(initialQ);
   const [loading, setLoading] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  const ranInitial = useRef(false);
+  useEffect(() => {
+    if (ranInitial.current || !initialQ) return;
+    ranInitial.current = true;
+    generate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function generate() {
     const desc = text.trim();
