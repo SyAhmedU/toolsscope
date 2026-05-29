@@ -198,12 +198,15 @@ export default function App() {
         {researchPack && <ResearchPackBanner pack={researchPack} onDismiss={dismissPack} />}
         {dataset && <Suggestions dataset={dataset} onRun={runRecommendation} pack={researchPack} />}
 
+        {/* Keyed wrapper so tab content fade-ups in on switch instead of snapping */}
+        <div key={tab} className="anim-reveal">
         {tab === 'plan' && <Plan datasetReady={!!dataset} />}
         {tab === 'data' && <DataPanel dataset={dataset} onChange={update} />}
         {tab === 'analyze' && dataset && <Analyze dataset={dataset} onCapture={addEntry} preset={preset} onPresetApplied={() => setPreset(null)} />}
         {tab === 'visualize' && dataset && <Visualize dataset={dataset} />}
         {tab === 'qual' && <Qual />}
         {(tab === 'analyze' || tab === 'visualize') && !dataset && <div className="empty-hint"><p>Load a dataset first (Data tab).</p></div>}
+        </div>
       </div>
     </>
   );

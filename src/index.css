@@ -296,3 +296,17 @@ table.corr td.corr-empty { background: var(--bg-soft); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
 }
+
+/* ── Shared animation utilities (matches the rest of the suite) ── */
+@keyframes anim-fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.anim-reveal { animation: anim-fade-up .65s cubic-bezier(.22, 1, .36, 1) both; }
+.thinking-dots { display: inline-flex; gap: 4px; align-items: center; line-height: 0; vertical-align: middle; margin-left: 4px; }
+.thinking-dots span { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .25; animation: anim-dot 1.3s ease-in-out infinite; }
+.thinking-dots span:nth-child(2) { animation-delay: .18s; }
+.thinking-dots span:nth-child(3) { animation-delay: .36s; }
+@keyframes anim-dot { 0%,80%,100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1.15); } }
+@media (prefers-reduced-motion: reduce) {
+  .anim-reveal { animation: none !important; opacity: 1 !important; }
+  .thinking-dots span { animation: none !important; opacity: .7 !important; }
+}
+
