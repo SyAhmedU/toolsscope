@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import SyedBar from './components/SyedBar';
 import Plan from './components/Plan';
 import DataPanel from './components/DataPanel';
-import Analyze from './components/Analyze';
-import Visualize from './components/Visualize';
-import Qual from './components/Qual';
 import Suggestions from './components/Suggestions';
+
+// Heavy, tab-gated panels — split out of the initial bundle so first paint
+// (Plan/Data) ships less JS. Each loads on first switch to its tab.
+const Analyze = lazy(() => import('./components/Analyze'));
+const Visualize = lazy(() => import('./components/Visualize'));
+const Qual = lazy(() => import('./components/Qual'));
 import type { Dataset } from './lib/types';
 import { loadDataset, saveDataset, clearDataset } from './lib/store';
 import { loadQualProject } from './lib/qual';
@@ -156,6 +159,7 @@ export default function App() {
 
   return (
     <>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <SyedBar />
       <div className="app">
         <header className="hero">
@@ -195,18 +199,22 @@ export default function App() {
           ))}
         </nav>
 
+        <main id="main-content" tabIndex={-1}>
         {researchPack && <ResearchPackBanner pack={researchPack} onDismiss={dismissPack} />}
         {dataset && <Suggestions dataset={dataset} onRun={runRecommendation} pack={researchPack} />}
 
         {/* Keyed wrapper so tab content fade-ups in on switch instead of snapping */}
         <div key={tab} className="anim-reveal">
+        <Suspense fallback={<div className="empty-hint"><p>Loading…</p></div>}>
         {tab === 'plan' && <Plan datasetReady={!!dataset} />}
         {tab === 'data' && <DataPanel dataset={dataset} onChange={update} />}
         {tab === 'analyze' && dataset && <Analyze dataset={dataset} onCapture={addEntry} preset={preset} onPresetApplied={() => setPreset(null)} />}
         {tab === 'visualize' && dataset && <Visualize dataset={dataset} />}
         {tab === 'qual' && <Qual />}
         {(tab === 'analyze' || tab === 'visualize') && !dataset && <div className="empty-hint"><p>Load a dataset first (Data tab).</p></div>}
+        </Suspense>
         </div>
+        </main>
       </div>
     </>
   );

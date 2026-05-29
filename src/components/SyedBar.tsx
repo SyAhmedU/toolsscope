@@ -1,6 +1,8 @@
 import { useState } from 'react';
 
-const KEYFRAMES = `@keyframes syed-glow{0%,100%{box-shadow:0 4px 14px -4px rgba(241,69,117,.45)}50%{box-shadow:0 6px 22px -4px rgba(146,112,244,.55)}}`;
+const KEYFRAMES = `@keyframes syed-glow{0%,100%{box-shadow:0 4px 14px -4px rgba(241,69,117,.45)}50%{box-shadow:0 6px 22px -4px rgba(146,112,244,.55)}}
+/* Collapse the suite nav on mobile so it can't force a desktop-width layout */
+@media (max-width:760px){.syed-suite-nav{display:none!important}}`;
 const WARM_GRAD = 'linear-gradient(135deg,#FF9656 0%,#F14575 55%,#9270F4 100%)';
 
 function effectiveTheme(): 'light' | 'dark' {
@@ -77,7 +79,7 @@ export default function SyedBar({ projectName = 'ToolsScope', currentSuiteStep =
         </a>
         <span style={divider} />
         <span style={project}>{projectName}</span>
-        <nav style={links} aria-label="Research Suite">
+        <nav className="syed-suite-nav" style={links} aria-label="Research Suite">
           <span style={suiteLabel}>Research Suite</span>
           {SUITE.map((s, i) => (
             <span key={s.key} style={{ display: 'inline-flex', alignItems: 'center' }}>
