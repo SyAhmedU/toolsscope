@@ -5,7 +5,7 @@
 import { useRef, useState } from 'react';
 import type { Dataset, VarType } from '../lib/types';
 import { parseDelimited, parseXlsx, buildDataset, isCadenceJson, buildDatasetFromCadence } from '../lib/parse';
-import { buildDemo } from '../lib/demo';
+import { SAMPLE_DATASETS } from '../lib/sampleData';
 
 const TYPES: VarType[] = ['numeric', 'likert', 'categorical', 'text', 'id'];
 const TYPE_COLOR: Record<VarType, string> = {
@@ -16,6 +16,7 @@ export default function DataPanel({ dataset, onChange }: { dataset: Dataset | nu
   const fileRef = useRef<HTMLInputElement>(null);
   const [paste, setPaste] = useState('');
   const [err, setErr] = useState('');
+  const [showSamples, setShowSamples] = useState(false);
 
   async function onFile(f: File) {
     setErr('');
@@ -59,9 +60,35 @@ export default function DataPanel({ dataset, onChange }: { dataset: Dataset | nu
         <button className="btn primary" onClick={() => fileRef.current?.click()}>⬆ Upload CSV / Excel</button>
         <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.json" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
-        <button className="btn" onClick={() => onChange(buildDemo())}>Load demo dataset</button>
+        <button className={`btn${showSamples ? ' primary' : ''}`} onClick={() => setShowSamples(s => !s)}>
+          📊 Sample datasets ({SAMPLE_DATASETS.length})
+        </button>
         {dataset && <button className="btn ghost" onClick={() => onChange(null)}>Clear</button>}
       </div>
+
+      {(showSamples || !dataset) && (
+        <div className="sample-gallery">
+          <div className="sample-gallery-head">
+            <strong>Sample datasets</strong>
+            <span className="muted"> · simulated teaching data — not real study data</span>
+          </div>
+          <div className="sample-grid">
+            {SAMPLE_DATASETS.map(s => (
+              <div key={s.id} className="sample-card">
+                <div className="sample-card-top">
+                  <span className="sample-card-name">{s.name}</span>
+                  <span className="sample-card-domain">{s.domain}</span>
+                </div>
+                <p className="sample-card-desc">{s.description}</p>
+                <div className="sample-card-foot">
+                  <span className="sample-card-best">{s.bestFor}</span>
+                  <button className="btn primary sm" onClick={() => { onChange(s.build()); setShowSamples(false); }}>Load</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <details className="paste-box">
         <summary>…or paste data (CSV / TSV)</summary>
@@ -74,7 +101,7 @@ export default function DataPanel({ dataset, onChange }: { dataset: Dataset | nu
 
       {!dataset && (
         <div className="empty-hint">
-          <p>No data loaded. Upload a cleaned CSV/Excel file (e.g. a Cadence export), paste a table, or load the demo to explore every analysis.</p>
+          <p>Upload a cleaned CSV/Excel file (e.g. a Cadence export), paste a table, or load one of the simulated sample datasets above to explore every analysis.</p>
         </div>
       )}
 
