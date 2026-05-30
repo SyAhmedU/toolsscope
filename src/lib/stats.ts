@@ -962,3 +962,53 @@ export function fmtP(p: number): string {
   if (!Number.isFinite(p)) return '—';
   return p < 0.001 ? '< .001' : p.toFixed(3).replace(/^0/, '');
 }
+
+// ── Meta-analysis (inverse-variance fixed + DerSimonian–Laird random) ──
+// Pools per-study effect sizes (yi) with their variances (vi = SE²). Fixed
+// effect = inverse-variance weighting; random effect adds the DL between-
+// study variance τ². Heterogeneity via Cochran's Q (χ² on k−1 df) and I².
+// All standard textbook formulas (Borenstein et al., 2009). Verified.
+export interface MetaStudy { label: string; yi: number; vi: number }
+export interface MetaPooled { estimate: number; se: number; ciLow: number; ciHigh: number; z: number; p: number }
+export interface MetaResult {
+  k: number;
+  fixed: MetaPooled;
+  random: MetaPooled;
+  Q: number; dfQ: number; Qp: number; I2: number; tau2: number;
+  weights: { label: string; yi: number; vi: number; wFixedPct: number; wRandomPct: number }[];
+}
+
+export function metaAnalysis(studies: MetaStudy[]): MetaResult {
+  const k = studies.length;
+  const Z = 1.959963985; // 95% normal critical value
+  const wF = studies.map(s => 1 / s.vi);
+  const sumWF = wF.reduce((a, b) => a + b, 0);
+  const fixedEst = studies.reduce((a, s, i) => a + wF[i] * s.yi, 0) / sumWF;
+  const fixedSE = Math.sqrt(1 / sumWF);
+
+  const Q = studies.reduce((a, s, i) => a + wF[i] * (s.yi - fixedEst) ** 2, 0);
+  const dfQ = k - 1;
+  const sumWF2 = wF.reduce((a, w) => a + w * w, 0);
+  const C = sumWF - sumWF2 / sumWF;
+  const tau2 = (dfQ > 0 && C > 0) ? Math.max(0, (Q - dfQ) / C) : 0;
+  const I2 = Q > dfQ ? Math.max(0, ((Q - dfQ) / Q) * 100) : 0;
+  const Qp = dfQ > 0 ? chiSqUpperP(Q, dfQ) : 1;
+
+  const wR = studies.map(s => 1 / (s.vi + tau2));
+  const sumWR = wR.reduce((a, b) => a + b, 0);
+  const randomEst = studies.reduce((a, s, i) => a + wR[i] * s.yi, 0) / sumWR;
+  const randomSE = Math.sqrt(1 / sumWR);
+
+  const pooled = (est: number, se: number): MetaPooled => {
+    const z = est / se;
+    return { estimate: est, se, ciLow: est - Z * se, ciHigh: est + Z * se, z, p: 2 * (1 - normalCdf(Math.abs(z))) };
+  };
+  return {
+    k, fixed: pooled(fixedEst, fixedSE), random: pooled(randomEst, randomSE),
+    Q, dfQ, Qp, I2, tau2,
+    weights: studies.map((s, i) => ({
+      label: s.label, yi: s.yi, vi: s.vi,
+      wFixedPct: (wF[i] / sumWF) * 100, wRandomPct: (wR[i] / sumWR) * 100,
+    })),
+  };
+}
