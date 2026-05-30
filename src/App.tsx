@@ -9,6 +9,7 @@ import Suggestions from './components/Suggestions';
 const Analyze = lazy(() => import('./components/Analyze'));
 const Visualize = lazy(() => import('./components/Visualize'));
 const Qual = lazy(() => import('./components/Qual'));
+const MetaAnalysis = lazy(() => import('./components/MetaAnalysis'));
 import type { Dataset } from './lib/types';
 import { loadDataset, saveDataset, clearDataset } from './lib/store';
 import { loadQualProject } from './lib/qual';
@@ -20,7 +21,7 @@ import { buildDatasetFromCadence, isCadenceJson } from './lib/parse';
 import type { ResearchPack } from './lib/researchpack';
 import { decodeResearchPack, saveResearchPack, loadResearchPack, clearResearchPack } from './lib/researchpack';
 
-type Tab = 'plan' | 'data' | 'analyze' | 'visualize' | 'qual';
+type Tab = 'plan' | 'data' | 'analyze' | 'visualize' | 'qual' | 'meta';
 
 export default function App() {
   const [dataset, setDataset] = useState<Dataset | null>(() => loadDataset());
@@ -155,6 +156,7 @@ export default function App() {
     { key: 'analyze', label: 'Analyze', enabled: !!dataset },
     { key: 'visualize', label: 'Visualize', enabled: !!dataset },
     { key: 'qual', label: 'Qualitative', enabled: true },
+    { key: 'meta', label: 'Meta-analysis', enabled: true },
   ];
 
   return (
@@ -211,6 +213,7 @@ export default function App() {
         {tab === 'analyze' && dataset && <Analyze dataset={dataset} onCapture={addEntry} preset={preset} onPresetApplied={() => setPreset(null)} />}
         {tab === 'visualize' && dataset && <Visualize dataset={dataset} />}
         {tab === 'qual' && <Qual />}
+        {tab === 'meta' && <MetaAnalysis />}
         {(tab === 'analyze' || tab === 'visualize') && !dataset && <div className="empty-hint"><p>Load a dataset first (Data tab).</p></div>}
         </Suspense>
         </div>
