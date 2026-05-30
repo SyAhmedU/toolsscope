@@ -10,6 +10,7 @@ const Analyze = lazy(() => import('./components/Analyze'));
 const Visualize = lazy(() => import('./components/Visualize'));
 const Qual = lazy(() => import('./components/Qual'));
 const MetaAnalysis = lazy(() => import('./components/MetaAnalysis'));
+const PowerAnalysis = lazy(() => import('./components/PowerAnalysis'));
 import type { Dataset } from './lib/types';
 import { loadDataset, saveDataset, clearDataset } from './lib/store';
 import { loadQualProject } from './lib/qual';
@@ -21,7 +22,7 @@ import { buildDatasetFromCadence, isCadenceJson } from './lib/parse';
 import type { ResearchPack } from './lib/researchpack';
 import { decodeResearchPack, saveResearchPack, loadResearchPack, clearResearchPack } from './lib/researchpack';
 
-type Tab = 'plan' | 'data' | 'analyze' | 'visualize' | 'qual' | 'meta';
+type Tab = 'plan' | 'data' | 'analyze' | 'visualize' | 'qual' | 'meta' | 'power';
 
 export default function App() {
   const [dataset, setDataset] = useState<Dataset | null>(() => loadDataset());
@@ -157,6 +158,7 @@ export default function App() {
     { key: 'visualize', label: 'Visualize', enabled: !!dataset },
     { key: 'qual', label: 'Qualitative', enabled: true },
     { key: 'meta', label: 'Meta-analysis', enabled: true },
+    { key: 'power', label: 'Power', enabled: true },
   ];
 
   return (
@@ -214,6 +216,7 @@ export default function App() {
         {tab === 'visualize' && dataset && <Visualize dataset={dataset} />}
         {tab === 'qual' && <Qual />}
         {tab === 'meta' && <MetaAnalysis />}
+        {tab === 'power' && <PowerAnalysis />}
         {(tab === 'analyze' || tab === 'visualize') && !dataset && <div className="empty-hint"><p>Load a dataset first (Data tab).</p></div>}
         </Suspense>
         </div>
