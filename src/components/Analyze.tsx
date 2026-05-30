@@ -13,6 +13,7 @@ import {
   describe, cronbach, correlationMatrix, independentTTest, pairedTTest,
   oneWayAnova, regression, chiSquare, factorAnalysis, mannWhitney,
   wilcoxonSignedRank, kruskalWallis, mediation, moderation,
+  congenericReliability,
   skewness, kurtosis,
   fmt, fmtP, pStars,
 } from '../lib/stats';
@@ -196,6 +197,7 @@ function Reliability({ cols, numeric, onCapture, preset, onPresetApplied }: { co
   const [sel, setSel] = useState<string[]>([]);
   useEffect(() => { if (preset?.kind === 'reliability') { setSel(preset.items); onPresetApplied?.(); } }, [preset, onPresetApplied]);
   const res = sel.length >= 2 ? cronbach(cols, sel) : null;
+  const cfa = sel.length >= 3 ? congenericReliability(cols, sel) : null;
   return (
     <div>
       <MethodologyCard m={METHODS.reliability} />
@@ -213,6 +215,24 @@ function Reliability({ cols, numeric, onCapture, preset, onPresetApplied }: { co
             <thead><tr><th>Item</th><th>Corrected item-total r</th><th>α if deleted</th></tr></thead>
             <tbody>{res.itemTotal.map(t => <tr key={t.item}><td>{t.item}</td><td>{fmt(t.corrected_r, 3)}</td><td>{fmt(t.alpha_if_deleted, 3)}</td></tr>)}</tbody>
           </table>
+          {cfa && (
+            <>
+              <div className="sub-label">Confirmatory measurement (single-factor)</div>
+              <div className="result-head">
+                <span className="big-stat">ω/CR = {fmt(cfa.omega, 3)}</span>
+                <span className="big-stat">AVE = {fmt(cfa.ave, 3)}</span>
+                <span className="muted small">
+                  {cfa.omega >= 0.7 ? 'ω/CR ≥ .70 (acceptable reliability)' : 'ω/CR < .70 — reliability low'} ·
+                  {cfa.ave >= 0.5 ? ' AVE ≥ .50 (convergent validity)' : ' AVE < .50 — weak convergent validity'}
+                </span>
+              </div>
+              <table className="grid stats">
+                <thead><tr><th>Item</th><th>Std. loading (1-factor)</th></tr></thead>
+                <tbody>{cfa.loadings.map(l => <tr key={l.item}><td>{l.item}</td><td>{fmt(l.loading, 3)}</td></tr>)}</tbody>
+              </table>
+              <p className="muted small">McDonald's ω (= composite reliability) and Average Variance Extracted from the single-factor solution (McDonald 1999; Fornell &amp; Larcker 1981). This is CFA-style measurement assessment — for a full SEM with fit indices (χ², CFI, RMSEA), use dedicated software.</p>
+            </>
+          )}
           <div className="result-actions">
             <AIWriteup analysis="scale reliability (Cronbach's alpha)" result={res} methodId="reliability" />
             <CaptureBtn onClick={() => onCapture({ kind: 'reliability', result: res })} />

@@ -1053,3 +1053,40 @@ export function tTestRequiredN(d: number, power = 0.8, alpha = 0.05): number {
   const z = qnorm(1 - alpha / 2) + qnorm(power);
   return Math.ceil(2 * (z * z) / (d * d));
 }
+
+// ── Congeneric reliability & convergent validity (CFA-style) ──────────
+// For a set of items hypothesised to measure ONE construct, takes the
+// single-factor (unrotated) standardized loadings and reports McDonald's ω
+// (= composite reliability, CR) and Average Variance Extracted (AVE):
+//   ω = CR = (Σλ)² / [ (Σλ)² + Σ(1−λ²) ]      AVE = mean(λ²)
+// This is the practically-useful core of a confirmatory measurement model
+// (ω/CR ≥ .70 acceptable; AVE ≥ .50 convergent validity) — NOT a full SEM
+// with fit indices. Loadings come from the (textbook-verified) factor
+// routine. Standard formulas: McDonald (1999); Fornell & Larcker (1981).
+export interface CongenericResult {
+  k: number;
+  loadings: { item: string; loading: number }[];
+  omega: number;   // McDonald's ω total (= composite reliability, CR)
+  ave: number;     // average variance extracted
+}
+
+export function congenericReliability(cols: Record<string, Cell[]>, items: string[]): CongenericResult | null {
+  if (items.length < 3) return null;
+  const fa = factorAnalysis(cols, items, { method: 'pca', nFactors: 1, rotation: 'none' });
+  if (!fa) return null;
+  let load = items.map((_, i) => fa.loadings[i][0]);
+  // The sign of a factor is arbitrary; align so the construct is the positive
+  // direction (a genuinely reverse-keyed item then shows a negative loading).
+  const sum = load.reduce((a, b) => a + b, 0);
+  if (sum < 0) load = load.map(x => -x);
+  const sumL = load.reduce((a, b) => a + b, 0);
+  const sumUniq = load.reduce((a, l) => a + (1 - l * l), 0);
+  const sumL2 = load.reduce((a, l) => a + l * l, 0);
+  const omega = (sumL * sumL) / (sumL * sumL + sumUniq);
+  const ave = sumL2 / items.length;
+  return {
+    k: items.length,
+    loadings: items.map((item, i) => ({ item, loading: load[i] })),
+    omega, ave,
+  };
+}
